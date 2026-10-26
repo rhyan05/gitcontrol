@@ -93,12 +93,12 @@ function App() {
   const [commitMessage, setCommitMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [diffHeight, setDiffHeight] = useState(initialDiffHeight);
   const searchRef = useRef<HTMLInputElement>(null);
   const diffRequest = useRef(0);
 
-  const { status, branches, commits, loading, refreshing, error, refresh } =
-    useRepo(repo);
+  const { status, branches, commits, loading, error, refresh } = useRepo(repo);
 
   const rememberRepo = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -116,7 +116,8 @@ function App() {
 
   const refreshRepo = useCallback(() => {
     rememberRepo(repo);
-    void refresh(true);
+    setManualRefreshing(true);
+    void refresh(true).finally(() => setManualRefreshing(false));
   }, [rememberRepo, refresh, repo]);
 
   const changeRepo = useCallback((next: string) => {
@@ -434,7 +435,7 @@ function App() {
         onPickRepo={() => void pickRepo()}
         status={status}
         loading={loading}
-        refreshing={refreshing}
+        refreshing={manualRefreshing}
         onRefresh={refreshRepo}
         search={search}
         onSearchChange={setSearch}
