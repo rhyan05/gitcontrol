@@ -21,6 +21,18 @@ type PendingAction = {
   label: string;
 };
 
+const panelClass =
+  "flex min-h-[240px] min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl shadow-black/20 lg:min-h-0";
+const panelHeaderClass =
+  "flex items-center justify-between gap-2 border-b border-line bg-surface-2 px-3 py-2";
+const panelTitleClass =
+  "text-[11px] font-semibold uppercase tracking-[0.16em] text-muted";
+const listClass = "min-h-0 flex-1 overflow-auto py-1";
+const buttonClass =
+  "rounded-md border border-line bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-ink transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40";
+const inputClass =
+  "min-w-0 rounded-lg border border-line bg-surface px-3 py-1.5 font-mono text-xs text-ink outline-none transition placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/20";
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -29,6 +41,13 @@ function fileCode(file: FileStatus): string {
   if (file.untracked) return "??";
   if (file.unmerged) return "UU";
   return `${file.index_xy}${file.worktree_xy}`;
+}
+
+function codeColor(file: FileStatus): string {
+  if (file.untracked) return "text-warning";
+  if (file.unmerged) return "text-danger";
+  if (isStaged(file)) return "text-success";
+  return "text-muted";
 }
 
 function formatDate(iso: string): string {
@@ -42,6 +61,37 @@ function isStaged(file: FileStatus): boolean {
 
 function hasWorktreeChange(file: FileStatus): boolean {
   return file.worktree_xy !== "." && file.worktree_xy !== "";
+}
+
+function DiffView({ diff }: { diff: string }) {
+  return (
+    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre px-3 py-2 font-mono text-[11.5px] leading-[1.45]">
+      {diff.split("\n").map((line, index) => {
+        let color = "text-ink/80";
+        if (line.startsWith("+++") || line.startsWith("---")) {
+          color = "text-muted";
+        } else if (line.startsWith("+")) {
+          color = "text-success";
+        } else if (line.startsWith("-")) {
+          color = "text-danger";
+        } else if (line.startsWith("@@")) {
+          color = "text-accent";
+        } else if (
+          line.startsWith("diff ") ||
+          line.startsWith("index ") ||
+          line.startsWith("\\ No newline")
+        ) {
+          color = "text-muted";
+        }
+
+        return (
+          <span key={index} className={`block ${color}`}>
+            {line || " "}
+          </span>
+        );
+      })}
+    </pre>
+  );
 }
 
 function App() {
@@ -181,50 +231,72 @@ function App() {
   const currentBranch = status?.branch ?? "HEAD";
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <strong>gg</strong>
-          <span className="branch">{status?.branch ?? "—"}</span>
+    <div className="flex h-screen flex-col gap-3 bg-bg p-3 text-sm">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent text-[11px] font-black tracking-tight text-black">
+            gg
+          </span>
+          <span className="shrink-0 rounded-full border border-line bg-surface px-2.5 py-0.5 font-mono text-[11px] text-success">
+            {status?.branch ?? "—"}
+          </span>
           {status?.upstream && (
-            <span className="muted">→ {status.upstream}</span>
+            <span className="truncate font-mono text-[11px] text-muted">
+              → {status.upstream}
+            </span>
           )}
           {(status?.ahead ?? 0) > 0 && (
-            <span className="tag">↑{status?.ahead}</span>
+            <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+              ↑{status?.ahead}
+            </span>
           )}
           {(status?.behind ?? 0) > 0 && (
-            <span className="tag">↓{status?.behind}</span>
+            <span className="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+              ↓{status?.behind}
+            </span>
           )}
         </div>
 
-        <div className="repo">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           <input
             value={repo}
             onChange={(event) => setRepo(event.currentTarget.value)}
             spellCheck={false}
             aria-label="Caminho do repositório"
+            className={`${inputClass} flex-1 sm:w-[340px] sm:flex-none`}
           />
           <button
             type="button"
             onClick={() => void load()}
             disabled={loading || busy}
+            className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:border-accent hover:text-accent disabled:cursor-progress disabled:opacity-50"
           >
             {loading ? "Carregando…" : "Atualizar"}
           </button>
         </div>
       </header>
 
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice">{notice}</div>}
+      {error && (
+        <div className="whitespace-pre-wrap rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+          {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="whitespace-pre-wrap rounded-lg border border-success/40 bg-success/10 px-3 py-2 font-mono text-xs text-success">
+          {notice}
+        </div>
+      )}
 
       {pending && (
-        <div className="confirm">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
           <span>{pending.label}</span>
-          <div>
+          <div className="flex gap-2">
             <button
               type="button"
               onClick={() => void executePending()}
               disabled={busy}
+              className={buttonClass}
             >
               Confirmar
             </button>
@@ -232,6 +304,7 @@ function App() {
               type="button"
               onClick={() => setPending(null)}
               disabled={busy}
+              className={buttonClass}
             >
               Cancelar
             </button>
@@ -239,11 +312,11 @@ function App() {
         </div>
       )}
 
-      <main className="panels">
-        <section className="panel">
-          <header>
-            <h2>Branches</h2>
-            <div className="panel-tools">
+      <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-auto lg:grid-cols-3 lg:overflow-hidden">
+        <section className={panelClass}>
+          <header className={panelHeaderClass}>
+            <h2 className={panelTitleClass}>Branches</h2>
+            <div className="flex items-center gap-1.5">
               {selectedBranch && (
                 <>
                   <button
@@ -258,6 +331,7 @@ function App() {
                         }?`,
                       })
                     }
+                    className={buttonClass}
                   >
                     Checkout
                   </button>
@@ -271,15 +345,18 @@ function App() {
                         label: `merge ${selectedBranch.name} em ${currentBranch}?`,
                       })
                     }
+                    className={buttonClass}
                   >
                     Merge
                   </button>
                 </>
               )}
-              <span className="count">{branches.length}</span>
+              <span className="text-[10px] tabular-nums text-muted">
+                {branches.length}
+              </span>
             </div>
           </header>
-          <ul>
+          <ul className={listClass}>
             {branches.map((branch) => {
               const selected =
                 selectedBranch?.name === branch.name &&
@@ -287,26 +364,48 @@ function App() {
               return (
                 <li
                   key={`${branch.remote ? "r" : "l"}:${branch.name}`}
-                  className={selected ? "selected" : ""}
+                  className={`flex cursor-pointer items-center gap-2 border-l-2 px-3 py-1.5 transition ${
+                    selected
+                      ? "border-accent bg-accent/10"
+                      : "border-transparent hover:bg-surface-2"
+                  }`}
                   onClick={() => setSelectedBranch(branch)}
                 >
-                  <span className={branch.head ? "dot head" : "dot"} />
-                  <span className="name">{branch.name}</span>
-                  {branch.remote && <span className="tag">remota</span>}
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full border ${
+                      branch.head
+                        ? "border-success bg-success"
+                        : "border-muted"
+                    }`}
+                  />
+                  <span className="truncate font-mono text-[12.5px] text-ink/90">
+                    {branch.name}
+                  </span>
+                  {branch.remote && (
+                    <span className="ml-auto shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-accent">
+                      remota
+                    </span>
+                  )}
                   {!branch.remote && branch.upstream && (
-                    <span className="muted">→ {branch.upstream}</span>
+                    <span className="ml-auto shrink-0 truncate font-mono text-[10px] text-muted">
+                      → {branch.upstream}
+                    </span>
                   )}
                 </li>
               );
             })}
-            {branches.length === 0 && <li className="empty">nenhuma branch</li>}
+            {branches.length === 0 && (
+              <li className="px-3 py-2 text-xs italic text-muted">
+                nenhuma branch
+              </li>
+            )}
           </ul>
         </section>
 
-        <section className="panel">
-          <header>
-            <h2>Commits</h2>
-            <div className="panel-tools">
+        <section className={panelClass}>
+          <header className={panelHeaderClass}>
+            <h2 className={panelTitleClass}>Commits</h2>
+            <div className="flex items-center gap-1.5">
               {selectedCommit && (
                 <button
                   type="button"
@@ -321,44 +420,72 @@ function App() {
                       )} em ${currentBranch}?`,
                     })
                   }
+                  className={buttonClass}
                 >
                   Cherry-pick
                 </button>
               )}
-              <span className="count">{commits.length}</span>
+              <span className="text-[10px] tabular-nums text-muted">
+                {commits.length}
+              </span>
             </div>
           </header>
-          <ul>
+          <ul className={listClass}>
             {commits.map((commit) => (
               <li
                 key={commit.hash}
-                className={selectedCommit?.hash === commit.hash ? "selected" : ""}
+                className={`flex cursor-pointer flex-col gap-0.5 border-l-2 px-3 py-1.5 transition ${
+                  selectedCommit?.hash === commit.hash
+                    ? "border-accent bg-accent/10"
+                    : "border-transparent hover:bg-surface-2"
+                }`}
                 onClick={() => void openCommit(commit)}
               >
-                <span className="hash">{commit.hash.slice(0, 7)}</span>
-                <span className="subject">{commit.subject}</span>
-                <span className="meta">
+                <div className="flex items-baseline gap-2">
+                  <span className="shrink-0 font-mono text-[11px] text-muted">
+                    {commit.hash.slice(0, 7)}
+                  </span>
+                  <span className="truncate text-[13px] text-ink/90">
+                    {commit.subject}
+                  </span>
+                </div>
+                <div className="text-[10px] text-muted">
                   {commit.author} · {formatDate(commit.time)}
-                </span>
+                </div>
               </li>
             ))}
-            {commits.length === 0 && <li className="empty">nenhum commit</li>}
+            {commits.length === 0 && (
+              <li className="px-3 py-2 text-xs italic text-muted">
+                nenhum commit
+              </li>
+            )}
           </ul>
         </section>
 
-        <section className="panel">
-          <header>
-            <h2>Status</h2>
-            <span className="count">{files.length}</span>
+        <section className={panelClass}>
+          <header className={panelHeaderClass}>
+            <h2 className={panelTitleClass}>Status</h2>
+            <span className="text-[10px] tabular-nums text-muted">
+              {files.length}
+            </span>
           </header>
-          <ul>
+          <ul className={listClass}>
             {files.map((file) => (
-              <li key={`${file.path}:${fileCode(file)}`}>
-                <span className={file.untracked ? "code untracked" : "code"}>
+              <li
+                key={`${file.path}:${fileCode(file)}`}
+                className="flex items-center gap-2 px-3 py-1.5 transition hover:bg-surface-2"
+              >
+                <span
+                  className={`w-5 shrink-0 font-mono text-[11px] ${codeColor(
+                    file,
+                  )}`}
+                >
                   {fileCode(file)}
                 </span>
-                <span className="path">{file.path}</span>
-                <span className="file-actions">
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink/90">
+                  {file.path}
+                </span>
+                <span className="flex shrink-0 gap-1">
                   {(file.untracked ||
                     file.unmerged ||
                     hasWorktreeChange(file)) && (
@@ -372,6 +499,7 @@ function App() {
                           false,
                         )
                       }
+                      className={buttonClass}
                     >
                       Stage
                     </button>
@@ -387,6 +515,7 @@ function App() {
                           false,
                         )
                       }
+                      className={buttonClass}
                     >
                       Unstage
                     </button>
@@ -394,35 +523,53 @@ function App() {
                 </span>
               </li>
             ))}
-            {files.length === 0 && <li className="empty">working tree limpo</li>}
+            {files.length === 0 && (
+              <li className="px-3 py-2 text-xs italic text-muted">
+                working tree limpo
+              </li>
+            )}
           </ul>
 
-          <form className="commit-form" onSubmit={(e) => void submitCommit(e)}>
+          <form
+            className="flex gap-2 border-t border-line bg-surface-2 p-2"
+            onSubmit={(e) => void submitCommit(e)}
+          >
             <input
               value={commitMessage}
               onChange={(event) => setCommitMessage(event.currentTarget.value)}
               placeholder="mensagem do commit"
               disabled={busy}
+              className={`${inputClass} flex-1`}
             />
-            <button type="submit" disabled={busy || !commitMessage.trim()}>
+            <button
+              type="submit"
+              disabled={busy || !commitMessage.trim()}
+              className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
               Commit
             </button>
           </form>
         </section>
       </main>
 
-      <section className="diff">
-        <header>
-          <h2>
+      <section className="flex h-[28vh] min-h-[140px] max-h-[300px] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl shadow-black/20">
+        <header className={panelHeaderClass}>
+          <h2 className={panelTitleClass}>
             {selectedCommit
               ? `Diff ${selectedCommit.hash.slice(0, 7)}`
               : "Diff"}
           </h2>
         </header>
         {selectedCommit ? (
-          <pre>{diff || "carregando…"}</pre>
+          diff ? (
+            <DiffView diff={diff} />
+          ) : (
+            <p className="px-3 py-2 text-xs text-muted">carregando…</p>
+          )
         ) : (
-          <p className="empty">Selecione um commit para ver o diff.</p>
+          <p className="px-3 py-2 text-xs text-muted">
+            Selecione um commit para ver o diff.
+          </p>
         )}
       </section>
     </div>
