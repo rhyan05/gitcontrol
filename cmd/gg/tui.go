@@ -42,6 +42,24 @@ var (
 
 	// footerStyle deixa as teclas de ajuda discretas no rodapé.
 	footerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
+	// Cores por tipo de dado (item 4c):
+	//   - hash de commit em cinza, pra não competir com o subject;
+	//   - branch atual (HEAD) em verde;
+	//   - arquivo untracked em amarelo.
+	hashStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	headStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	untrackedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+
+	// selectedStyle destaca a linha inteira no painel focado (item 4d).
+	// ColorWhitespace(true) é o que faz o fundo cobrir também o padding
+	// adicionado por Width, virando uma barra contínua em vez de um bloco
+	// só atrás do texto.
+	selectedStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("237")).
+			Foreground(lipgloss.Color("15")).
+			Bold(true).
+			ColorWhitespace(true)
 )
 
 // model é TODO o estado da aplicação. A regra do Bubbletea é simples:
@@ -250,7 +268,9 @@ func (m model) count(panel int) int {
 }
 
 // branchLines monta as linhas do painel de branches.
-// O marcador ">" só aparece no painel focado; "*" indica a branch atual.
+//
+// A branch atual ganha "*" e cor verde. A linha selecionada é montada sem
+// cores internas e recebe o highlight por fora (ver selectedLine).
 func (m model) branchLines() []string {
 	if m.branchesErr != nil {
 		return []string{"erro: " + m.branchesErr.Error()}
@@ -261,16 +281,29 @@ func (m model) branchLines() []string {
 
 	lines := make([]string, 0, len(m.branches))
 	for i, b := range m.branches {
-		name := "  " + b.Name
+		// Texto puro, sem ANSI: é o que vai para o highlight.
+		plain := "  " + b.Name
 		if b.IsHead {
-			name = "* " + b.Name
+			plain = "* " + b.Name
 		}
-		lines = append(lines, cursorMark(i == m.cursor[focusBranches], m.focus == focusBranches)+name)
+
+		if m.isSelected(focusBranches, i) {
+			lines = append(lines, m.selectedLine(plain))
+			continue
+		}
+
+		// Fora do highlight, o "* nome" da HEAD fica verde.
+		text := plain
+		if b.IsHead {
+			text = headStyle.Render(plain)
+		}
+		lines = append(lines, "  "+text)
 	}
 	return lines
 }
 
 // commitLines monta as linhas do painel de commits: hash curto + subject.
+// O hash fica cinza; o subject mantém a cor padrão do terminal.
 func (m model) commitLines() []string {
 	if m.commitsErr != nil {
 		return []string{"erro: " + m.commitsErr.Error()}
@@ -281,12 +314,22 @@ func (m model) commitLines() []string {
 
 	lines := make([]string, 0, len(m.commits))
 	for i, c := range m.commits {
-		lines = append(lines, cursorMark(i == m.cursor[focusCommits], m.focus == focusCommits)+shortHash(c.Hash)+" "+c.Subject)
+		hash := shortHash(c.Hash)
+
+		if m.isSelected(focusCommits, i) {
+			// Sem hashStyle aqui: cor interna + reset apagaria o fundo
+			// do highlight no meio da linha.
+			lines = append(lines, m.selectedLine(hash+" "+c.Subject))
+			continue
+		}
+
+		lines = append(lines, "  "+hashStyle.Render(hash)+" "+c.Subject)
 	}
 	return lines
 }
 
 // statusLines monta as linhas do painel de status: código XY + caminho.
+// Untracked fica amarelo para saltar aos olhos, como no lazygit.
 func (m model) statusLines() []string {
 	if m.statusErr != nil {
 		return []string{"erro: " + m.statusErr.Error()}
@@ -299,7 +342,18 @@ func (m model) statusLines() []string {
 
 	lines := make([]string, 0, len(files))
 	for i, f := range files {
-		lines = append(lines, cursorMark(i == m.cursor[focusStatus], m.focus == focusStatus)+statusCode(f)+" "+f.Path)
+		plain := statusCode(f) + " " + f.Path
+
+		if m.isSelected(focusStatus, i) {
+			lines = append(lines, m.selectedLine(plain))
+			continue
+		}
+
+		text := plain
+		if f.IsUntracked {
+			text = untrackedStyle.Render(plain)
+		}
+		lines = append(lines, "  "+text)
 	}
 	return lines
 }
@@ -318,13 +372,27 @@ func (m model) visibleStatus() []git.FileStatus {
 	return files
 }
 
-// cursorMark devolve o prefixo da linha. O ">" existe só quando o item está
-// selecionado E o painel está focado; assim só há um cursor visível na tela.
-func cursorMark(selected, focused bool) string {
-	if selected && focused {
-		return "> "
+// isSelected diz se o item `index` está sob o cursor e se o painel está ativo.
+// Assim só existe um cursor visível por vez, sempre no painel focado.
+func (m model) isSelected(panel, index int) bool {
+	return m.focus == panel && m.cursor[panel] == index
+}
+
+// selectedLine aplica o highlight (item 4d) numa linha de texto puro.
+//
+// Importante: `text` NÃO deve conter ANSI. Cores internas terminam com reset
+// (\x1b[0m), que apagaria o fundo do highlight no meio da linha. Por isso as
+// linhas selecionadas são montadas sem estilo e pintadas só aqui.
+func (m model) selectedLine(text string) string {
+	width := m.panelWidth() - 2
+	if width < 3 {
+		return "> " + text
 	}
-	return "  "
+
+	// "> " ocupa 2 células. Truncar ANTES de pintar evita que Width quebre a
+	// linha em duas e garante que o fundo tenha exatamente a largura útil.
+	line := truncate("> "+text, width)
+	return selectedStyle.Width(width).Render(line)
 }
 
 // statusCode resume o estado do arquivo em duas letras, no estilo do git:
@@ -367,7 +435,7 @@ func moveCursor(cursor, delta, count int) int {
 //
 // Usa lipgloss.MaxWidth porque ele mede células (não bytes): acentos e
 // caracteres largos não quebram o alinhamento. Também preserva sequências
-// ANSI, o que será importante quando as linhas ganharem cor (4c/4d).
+// ANSI, o que permite colorir as linhas sem desalinhar os painéis.
 func truncate(s string, width int) string {
 	if width <= 0 {
 		return ""

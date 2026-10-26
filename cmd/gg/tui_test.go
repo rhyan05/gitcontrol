@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestMoveCursor(t *testing.T) {
@@ -49,5 +50,18 @@ func TestViewShowsPanels(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("View não contém %q", want)
 		}
+	}
+}
+
+// O highlight precisa preencher a largura útil; se não preencher, a barra
+// de seleção fica "quebrada" no meio do painel.
+func TestSelectedLineFillsWidth(t *testing.T) {
+	m := model{width: 80}
+
+	got := lipgloss.Width(m.selectedLine("main"))
+	want := m.panelWidth() - 2
+
+	if got != want {
+		t.Errorf("largura da linha selecionada = %d, esperava %d", got, want)
 	}
 }
