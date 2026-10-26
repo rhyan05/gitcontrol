@@ -3,165 +3,199 @@ import {
   useEffect,
   useRef,
   useState,
-  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import {
+  Check,
+  GitCommitHorizontal,
+  GitMerge,
+  Minus,
+  Plus,
+  RefreshCw,
+  Search,
+} from "lucide-react";
+import { Logo } from "./components/Logo";
+import { AppHeader } from "./features/repo/AppHeader";
+import { StatusBar } from "./features/repo/StatusBar";
+import { BranchPanel } from "./features/branches/BranchPanel";
+import { CommitPanel } from "./features/commits/CommitPanel";
+import { StatusPanel } from "./features/status/StatusPanel";
+import { DiffPanel } from "./features/diff/DiffPanel";
+import {
+  CommandPalette,
+  type Command,
+} from "./features/command/CommandPalette";
+import { ConfirmDialog } from "./components/ui/ConfirmDialog";
+import { useToast } from "./components/ui/toast-context";
+import { useRepo } from "./hooks/useRepo";
+import "./App.css";
 import {
   gg,
   type Branch,
   type Commit,
-  type FileStatus,
   type ShowResult,
-  type StatusResult,
-} from "./gg";
-import "./App.css";
+} from "./lib/gg";
+import {
+  filterBranches,
+  filterCommits,
+  filterFiles,
+  groupStatus,
+  visibleFiles,
+} from "./lib/selectors";
+import { shortHash } from "./lib/format";
+import { cn } from "./lib/cn";
 
-type PendingAction = {
+type Pending = {
   action: "checkout" | "merge" | "cherry-pick";
   target: string;
-  label: string;
+  title: string;
+  description: string;
+  confirmLabel: string;
 };
 
-const panelClass =
-  "flex min-h-[240px] min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl shadow-black/20 lg:min-h-0";
-const panelHeaderClass =
-  "flex items-center justify-between gap-2 border-b border-line bg-surface-2 px-3 py-2";
-const panelTitleClass =
-  "text-[11px] font-semibold uppercase tracking-[0.16em] text-muted";
-const listClass = "min-h-0 flex-1 overflow-auto py-1";
-const buttonClass =
-  "rounded-md border border-line bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-ink transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40";
-const inputClass =
-  "min-w-0 rounded-lg border border-line bg-surface px-3 py-1.5 font-mono text-xs text-ink outline-none transition placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/20";
-
-function message(error: unknown): string {
+function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function fileCode(file: FileStatus): string {
-  if (file.untracked) return "??";
-  if (file.unmerged) return "UU";
-  return `${file.index_xy}${file.worktree_xy}`;
+function loadRecentRepos(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(
+      localStorage.getItem("gg.recentRepos") ?? "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
-function codeColor(file: FileStatus): string {
-  if (file.untracked) return "text-warning";
-  if (file.unmerged) return "text-danger";
-  if (isStaged(file)) return "text-success";
-  return "text-muted";
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString("pt-BR");
-}
-
-function isStaged(file: FileStatus): boolean {
-  return file.index_xy !== "." && file.index_xy !== "";
-}
-
-function hasWorktreeChange(file: FileStatus): boolean {
-  return file.worktree_xy !== "." && file.worktree_xy !== "";
-}
-
-function DiffView({ diff }: { diff: string }) {
-  return (
-    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre px-3 py-2 font-mono text-[11.5px] leading-[1.45]">
-      {diff.split("\n").map((line, index) => {
-        let color = "text-ink/80";
-        if (line.startsWith("+++") || line.startsWith("---")) {
-          color = "text-muted";
-        } else if (line.startsWith("+")) {
-          color = "text-success";
-        } else if (line.startsWith("-")) {
-          color = "text-danger";
-        } else if (line.startsWith("@@")) {
-          color = "text-accent";
-        } else if (
-          line.startsWith("diff ") ||
-          line.startsWith("index ") ||
-          line.startsWith("\\ No newline")
-        ) {
-          color = "text-muted";
-        }
-
-        return (
-          <span key={index} className={`block ${color}`}>
-            {line || " "}
-          </span>
-        );
-      })}
-    </pre>
-  );
+function initialDiffHeight(): number {
+  const stored = Number(localStorage.getItem("gg.diffHeight"));
+  return Number.isFinite(stored) && stored >= 120 ? stored : 240;
 }
 
 function App() {
-  // O caminho do repo fica salvo entre execuções. ".." funciona no `tauri dev`
-  // porque o processo roda dentro de desktop/, ainda dentro deste repositório.
+  const toast = useToast();
   const [repo, setRepo] = useState(
     () => localStorage.getItem("gg.repo") ?? "..",
   );
-  const [status, setStatus] = useState<StatusResult | null>(null);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [commits, setCommits] = useState<Commit[]>([]);
+  const [recentRepos, setRecentRepos] = useState(loadRecentRepos);
+  const [search, setSearch] = useState("");
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
   const [selectedCommit, setSelectedCommit] = useState<Commit | null>(null);
-  const [pending, setPending] = useState<PendingAction | null>(null);
-  const [commitMessage, setCommitMessage] = useState("");
   const [diff, setDiff] = useState("");
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState("");
+  const [copiedDiff, setCopiedDiff] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [commitMessage, setCommitMessage] = useState("");
   const [busy, setBusy] = useState(false);
-
-  // Evita que uma resposta antiga de `show` sobrescreva um clique mais novo.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [diffHeight, setDiffHeight] = useState(initialDiffHeight);
+  const searchRef = useRef<HTMLInputElement>(null);
   const diffRequest = useRef(0);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [nextStatus, nextBranches, nextCommits] = await Promise.all([
-        gg<StatusResult>(repo, "status"),
-        gg<Branch[]>(repo, "branches"),
-        gg<Commit[]>(repo, "log"),
-      ]);
-      setStatus(nextStatus);
-      setBranches(nextBranches);
-      setCommits(nextCommits);
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [repo]);
+  const { status, branches, commits, loading, refreshing, error, refresh } =
+    useRepo(repo);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const rememberRepo = useCallback((value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    setRecentRepos((current) => {
+      const next = [trimmed, ...current.filter((item) => item !== trimmed)].slice(
+        0,
+        8,
+      );
+      localStorage.setItem("gg.recentRepos", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const refreshRepo = useCallback(() => {
+    rememberRepo(repo);
+    void refresh(true);
+  }, [rememberRepo, refresh, repo]);
+
+  const changeRepo = useCallback((next: string) => {
+    diffRequest.current++;
+    setRepo(next);
+    setSelectedBranch(null);
+    setSelectedCommit(null);
+    setDiff("");
+    setDiffError("");
+    setDiffLoading(false);
+    setSearch("");
+    setCommitMessage("");
+  }, []);
+
+  const focusSearch = useCallback(() => {
+    searchRef.current?.focus();
+  }, []);
+
+  const selectCommit = useCallback(
+    (commit: Commit) => {
+      const request = ++diffRequest.current;
+      setSelectedCommit(commit);
+      setDiff("");
+      setDiffError("");
+      setDiffLoading(true);
+
+      void gg<ShowResult>(repo, "show", commit.hash)
+        .then((result) => {
+          if (request === diffRequest.current) setDiff(result.diff);
+        })
+        .catch((err: unknown) => {
+          if (request === diffRequest.current) {
+            setDiffError(errorMessage(err));
+          }
+        })
+        .finally(() => {
+          if (request === diffRequest.current) setDiffLoading(false);
+        });
+    },
+    [repo],
+  );
 
   useEffect(() => {
     localStorage.setItem("gg.repo", repo);
   }, [repo]);
 
-  async function openCommit(commit: Commit) {
-    const request = ++diffRequest.current;
-    setSelectedCommit(commit);
-    setDiff("");
+  useEffect(() => {
+    localStorage.setItem("gg.diffHeight", String(diffHeight));
+  }, [diffHeight]);
 
-    try {
-      const result = await gg<ShowResult>(repo, "show", commit.hash);
-      if (request === diffRequest.current) {
-        setDiff(result.diff);
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable === true;
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen(true);
+        return;
       }
-    } catch (err) {
-      if (request === diffRequest.current) {
-        setDiff(`erro: ${message(err)}`);
+
+      if (typing) return;
+
+      if (event.key === "/") {
+        event.preventDefault();
+        focusSearch();
+      } else if (event.key === "r") {
+        event.preventDefault();
+        refreshRepo();
       }
     }
-  }
 
-  // Executa uma ação do contrato --json, recarrega e mostra o resultado.
-  // Ações que mudam branches/commits limpam a seleção; stage/unstage não.
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [focusSearch, refreshRepo]);
+
   const runAction = useCallback(
     async (
       args: string[],
@@ -169,409 +203,382 @@ function App() {
       resetSelection = true,
     ): Promise<boolean> => {
       setBusy(true);
-      setError("");
-      setNotice("");
-
       try {
         await gg<null>(repo, ...args);
-        await load();
+        await refresh(true);
 
         if (resetSelection) {
+          diffRequest.current++;
           setSelectedBranch(null);
           setSelectedCommit(null);
           setDiff("");
+          setDiffError("");
+          setDiffLoading(false);
         }
-        setPending(null);
-        setNotice(success);
+        toast.success(success);
         return true;
       } catch (err) {
-        setError(message(err));
+        toast.error(errorMessage(err));
         return false;
       } finally {
         setBusy(false);
       }
     },
-    [repo, load],
+    [repo, refresh, toast],
   );
+
+  const stage = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      const label =
+        paths.length === 1 ? paths[0] : `${paths.length} arquivos`;
+      void runAction(["stage", ...paths], `stage: ${label}`, false);
+    },
+    [runAction],
+  );
+
+  const unstage = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      const label =
+        paths.length === 1 ? paths[0] : `${paths.length} arquivos`;
+      void runAction(["unstage", ...paths], `unstage: ${label}`, false);
+    },
+    [runAction],
+  );
+
+  async function commit() {
+    const message = commitMessage.trim();
+    if (!message) return;
+
+    const done = await runAction(["commit", message], `commit: ${message}`);
+    if (done) setCommitMessage("");
+  }
 
   async function executePending() {
     if (!pending) return;
 
-    switch (pending.action) {
-      case "checkout":
-        await runAction(
-          ["checkout", pending.target],
-          `checkout: ${pending.target}`,
-        );
-        break;
-      case "merge":
-        await runAction(["merge", pending.target], `merge: ${pending.target}`);
-        break;
-      case "cherry-pick":
-        await runAction(
-          ["cherry-pick", pending.target],
-          `cherry-pick: ${pending.target.slice(0, 7)}`,
-        );
-        break;
+    const done = await runAction(
+      [pending.action, pending.target],
+      `${pending.action}: ${pending.target}`,
+    );
+    if (done) setPending(null);
+  }
+
+  async function pickRepo() {
+    try {
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Escolher repositório",
+      });
+      if (typeof picked === "string") {
+        rememberRepo(picked);
+        changeRepo(picked);
+      }
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   }
 
-  async function submitCommit(event: FormEvent<HTMLFormElement>) {
+  async function copy(text: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(label);
+    } catch {
+      toast.error("Não foi possível copiar para a área de transferência");
+    }
+  }
+
+  async function copyDiff() {
+    if (!diff) return;
+    await copy(diff, "Diff copiado");
+    setCopiedDiff(true);
+    window.setTimeout(() => setCopiedDiff(false), 1500);
+  }
+
+  function startResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
-    const text = commitMessage.trim();
-    if (!text) return;
+    const startY = event.clientY;
+    const startHeight = diffHeight;
 
-    const done = await runAction(["commit", text], `commit: ${text}`);
-    if (done) {
-      setCommitMessage("");
-    }
+    const onMove = (moveEvent: PointerEvent) => {
+      const max = window.innerHeight * 0.6;
+      const next = Math.min(
+        Math.max(startHeight - (moveEvent.clientY - startY), 120),
+        max,
+      );
+      setDiffHeight(Math.round(next));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
   }
 
-  const files = (status?.files ?? []).filter((file) => !file.ignored);
-  const currentBranch = status?.branch ?? "HEAD";
+  function resizeBy(delta: number) {
+    setDiffHeight((current) =>
+      Math.min(Math.max(current + delta, 120), window.innerHeight * 0.6),
+    );
+  }
+
+  const filteredBranches = filterBranches(branches, search);
+  const filteredCommits = filterCommits(commits, search);
+  const files = visibleFiles(status?.files ?? []);
+  const filteredFiles = filterFiles(files, search);
+  const groups = groupStatus(filteredFiles);
+  const totalFiles = filteredFiles.length;
+
+  const stageAllPaths = Array.from(
+    new Set([
+      ...groups.conflicts.map((file) => file.path),
+      ...groups.changes.map((file) => file.path),
+      ...groups.untracked.map((file) => file.path),
+    ]),
+  );
+  const unstageAllPaths = groups.staged.map((file) => file.path);
+
+  const commands: Command[] = [
+    {
+      id: "refresh",
+      label: "Atualizar repositório",
+      hint: "r",
+      icon: <RefreshCw size={14} />,
+      run: refreshRepo,
+    },
+    {
+      id: "search",
+      label: "Buscar branches, commits e arquivos",
+      hint: "/",
+      icon: <Search size={14} />,
+      run: focusSearch,
+    },
+  ];
+
+  if (selectedBranch && !selectedBranch.head) {
+    commands.push(
+      {
+        id: "checkout",
+        label: `Checkout ${selectedBranch.name}`,
+        icon: <Check size={14} />,
+        run: () =>
+          setPending({
+            action: "checkout",
+            target: selectedBranch.name,
+            title: `Checkout em ${selectedBranch.name}?`,
+            description: selectedBranch.remote
+              ? "Uma branch local de tracking será criada a partir da remota."
+              : "A branch atual do repositório será trocada.",
+            confirmLabel: "Fazer checkout",
+          }),
+      },
+      {
+        id: "merge",
+        label: `Merge ${selectedBranch.name} em ${status?.branch ?? "HEAD"}`,
+        icon: <GitMerge size={14} />,
+        run: () =>
+          setPending({
+            action: "merge",
+            target: selectedBranch.name,
+            title: `Merge de ${selectedBranch.name}?`,
+            description: `A branch será incorporada em ${status?.branch ?? "HEAD"}. Conflitos precisam ser resolvidos no terminal.`,
+            confirmLabel: "Fazer merge",
+          }),
+      },
+    );
+  }
+
+  if (selectedCommit) {
+    commands.push({
+      id: "cherry-pick",
+      label: `Cherry-pick ${shortHash(selectedCommit.hash)}`,
+      icon: <GitCommitHorizontal size={14} />,
+      run: () =>
+        setPending({
+          action: "cherry-pick",
+          target: selectedCommit.hash,
+          title: `Cherry-pick ${shortHash(selectedCommit.hash)}?`,
+          description: `O commit será aplicado em ${status?.branch ?? "HEAD"}.`,
+          confirmLabel: "Aplicar commit",
+        }),
+    });
+  }
+
+  if (stageAllPaths.length > 0) {
+    commands.push({
+      id: "stage-all",
+      label: "Stage em todas as alterações",
+      icon: <Plus size={14} />,
+      run: () => stage(stageAllPaths),
+    });
+  }
+  if (unstageAllPaths.length > 0) {
+    commands.push({
+      id: "unstage-all",
+      label: "Unstage de todos os arquivos",
+      icon: <Minus size={14} />,
+      run: () => unstage(unstageAllPaths),
+    });
+  }
 
   return (
-    <div className="flex h-screen flex-col gap-3 bg-bg p-3 text-sm">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent text-[11px] font-black tracking-tight text-black">
-            gg
-          </span>
-          <span className="shrink-0 rounded-full border border-line bg-surface px-2.5 py-0.5 font-mono text-[11px] text-success">
-            {status?.branch ?? "—"}
-          </span>
-          {status?.upstream && (
-            <span className="truncate font-mono text-[11px] text-muted">
-              → {status.upstream}
-            </span>
-          )}
-          {(status?.ahead ?? 0) > 0 && (
-            <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">
-              ↑{status?.ahead}
-            </span>
-          )}
-          {(status?.behind ?? 0) > 0 && (
-            <span className="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-              ↓{status?.behind}
-            </span>
-          )}
-        </div>
-
-        <div className="flex w-full items-center gap-2 sm:w-auto">
-          <input
-            value={repo}
-            onChange={(event) => setRepo(event.currentTarget.value)}
-            spellCheck={false}
-            aria-label="Caminho do repositório"
-            className={`${inputClass} flex-1 sm:w-[340px] sm:flex-none`}
-          />
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading || busy}
-            className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:border-accent hover:text-accent disabled:cursor-progress disabled:opacity-50"
-          >
-            {loading ? "Carregando…" : "Atualizar"}
-          </button>
-        </div>
-      </header>
+    <div className="flex h-screen flex-col bg-bg text-ink">
+      <AppHeader
+        repo={repo}
+        onRepoChange={changeRepo}
+        recentRepos={recentRepos}
+        onPickRepo={() => void pickRepo()}
+        status={status}
+        loading={loading}
+        refreshing={refreshing}
+        onRefresh={refreshRepo}
+        search={search}
+        onSearchChange={setSearch}
+        searchRef={searchRef}
+      />
 
       {error && (
-        <div className="whitespace-pre-wrap rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
-          {error}
+        <div className="mx-2 mt-2 flex shrink-0 items-center gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 font-mono text-[12px] text-danger">
+          <Logo className="h-5 w-5 shrink-0" />
+          <span className="whitespace-pre-wrap">{error}</span>
         </div>
       )}
 
-      {notice && (
-        <div className="whitespace-pre-wrap rounded-lg border border-success/40 bg-success/10 px-3 py-2 font-mono text-xs text-success">
-          {notice}
-        </div>
-      )}
+      <div className="flex min-h-0 flex-1 flex-col px-2 pt-2">
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-surface">
+          <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-line overflow-auto lg:grid-cols-[240px_minmax(0,1fr)_320px] lg:divide-x lg:divide-y-0 lg:overflow-hidden">
+            <BranchPanel
+              branches={filteredBranches}
+              selected={selectedBranch}
+              onSelect={setSelectedBranch}
+              onCheckout={() => {
+                if (!selectedBranch) return;
+                setPending({
+                  action: "checkout",
+                  target: selectedBranch.name,
+                  title: `Checkout em ${selectedBranch.name}?`,
+                  description: selectedBranch.remote
+                    ? "Uma branch local de tracking será criada a partir da remota."
+                    : "A branch atual do repositório será trocada.",
+                  confirmLabel: "Fazer checkout",
+                });
+              }}
+              onMerge={() => {
+                if (!selectedBranch) return;
+                setPending({
+                  action: "merge",
+                  target: selectedBranch.name,
+                  title: `Merge de ${selectedBranch.name}?`,
+                  description: `A branch será incorporada em ${status?.branch ?? "HEAD"}. Conflitos precisam ser resolvidos no terminal.`,
+                  confirmLabel: "Fazer merge",
+                });
+              }}
+              busy={busy}
+              loading={loading}
+              query={search}
+            />
 
-      {pending && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-          <span>{pending.label}</span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => void executePending()}
-              disabled={busy}
-              className={buttonClass}
-            >
-              Confirmar
-            </button>
-            <button
-              type="button"
-              onClick={() => setPending(null)}
-              disabled={busy}
-              className={buttonClass}
-            >
-              Cancelar
-            </button>
+            <CommitPanel
+              commits={filteredCommits}
+              selected={selectedCommit}
+              onSelect={selectCommit}
+              onCherryPick={() => {
+                if (!selectedCommit) return;
+                setPending({
+                  action: "cherry-pick",
+                  target: selectedCommit.hash,
+                  title: `Cherry-pick ${shortHash(selectedCommit.hash)}?`,
+                  description: `O commit será aplicado em ${status?.branch ?? "HEAD"}.`,
+                  confirmLabel: "Aplicar commit",
+                });
+              }}
+              onCopyHash={(hash) => void copy(hash, "Hash copiado")}
+              busy={busy}
+              loading={loading}
+              query={search}
+            />
+
+            <StatusPanel
+              groups={groups}
+              total={totalFiles}
+              query={search}
+              loading={loading}
+              busy={busy}
+              commitMessage={commitMessage}
+              onCommitMessageChange={setCommitMessage}
+              onCommit={() => void commit()}
+              onStage={stage}
+              onUnstage={unstage}
+            />
           </div>
         </div>
-      )}
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-auto lg:grid-cols-3 lg:overflow-hidden">
-        <section className={panelClass}>
-          <header className={panelHeaderClass}>
-            <h2 className={panelTitleClass}>Branches</h2>
-            <div className="flex items-center gap-1.5">
-              {selectedBranch && (
-                <>
-                  <button
-                    type="button"
-                    disabled={busy || selectedBranch.head}
-                    onClick={() =>
-                      setPending({
-                        action: "checkout",
-                        target: selectedBranch.name,
-                        label: `checkout ${selectedBranch.name}${
-                          selectedBranch.remote ? " (cria branch local)" : ""
-                        }?`,
-                      })
-                    }
-                    className={buttonClass}
-                  >
-                    Checkout
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || selectedBranch.head}
-                    onClick={() =>
-                      setPending({
-                        action: "merge",
-                        target: selectedBranch.name,
-                        label: `merge ${selectedBranch.name} em ${currentBranch}?`,
-                      })
-                    }
-                    className={buttonClass}
-                  >
-                    Merge
-                  </button>
-                </>
-              )}
-              <span className="text-[10px] tabular-nums text-muted">
-                {branches.length}
-              </span>
-            </div>
-          </header>
-          <ul className={listClass}>
-            {branches.map((branch) => {
-              const selected =
-                selectedBranch?.name === branch.name &&
-                selectedBranch.remote === branch.remote;
-              return (
-                <li
-                  key={`${branch.remote ? "r" : "l"}:${branch.name}`}
-                  className={`flex cursor-pointer items-center gap-2 border-l-2 px-3 py-1.5 transition ${
-                    selected
-                      ? "border-accent bg-accent/10"
-                      : "border-transparent hover:bg-surface-2"
-                  }`}
-                  onClick={() => setSelectedBranch(branch)}
-                >
-                  <span
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full border ${
-                      branch.head
-                        ? "border-success bg-success"
-                        : "border-muted"
-                    }`}
-                  />
-                  <span className="truncate font-mono text-[12.5px] text-ink/90">
-                    {branch.name}
-                  </span>
-                  {branch.remote && (
-                    <span className="ml-auto shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-accent">
-                      remota
-                    </span>
-                  )}
-                  {!branch.remote && branch.upstream && (
-                    <span className="ml-auto shrink-0 truncate font-mono text-[10px] text-muted">
-                      → {branch.upstream}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-            {branches.length === 0 && (
-              <li className="px-3 py-2 text-xs italic text-muted">
-                nenhuma branch
-              </li>
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Redimensionar painel de diff"
+          tabIndex={0}
+          onPointerDown={startResize}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              resizeBy(24);
+            } else if (event.key === "ArrowDown") {
+              event.preventDefault();
+              resizeBy(-24);
+            }
+          }}
+          className="group flex h-3 shrink-0 cursor-row-resize items-center justify-center focus-visible:outline-none"
+        >
+          <span
+            className={cn(
+              "h-0.5 w-12 rounded-full bg-line transition group-hover:bg-accent/70",
             )}
-          </ul>
-        </section>
+          />
+        </div>
 
-        <section className={panelClass}>
-          <header className={panelHeaderClass}>
-            <h2 className={panelTitleClass}>Commits</h2>
-            <div className="flex items-center gap-1.5">
-              {selectedCommit && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    setPending({
-                      action: "cherry-pick",
-                      target: selectedCommit.hash,
-                      label: `cherry-pick ${selectedCommit.hash.slice(
-                        0,
-                        7,
-                      )} em ${currentBranch}?`,
-                    })
-                  }
-                  className={buttonClass}
-                >
-                  Cherry-pick
-                </button>
-              )}
-              <span className="text-[10px] tabular-nums text-muted">
-                {commits.length}
-              </span>
-            </div>
-          </header>
-          <ul className={listClass}>
-            {commits.map((commit) => (
-              <li
-                key={commit.hash}
-                className={`flex cursor-pointer flex-col gap-0.5 border-l-2 px-3 py-1.5 transition ${
-                  selectedCommit?.hash === commit.hash
-                    ? "border-accent bg-accent/10"
-                    : "border-transparent hover:bg-surface-2"
-                }`}
-                onClick={() => void openCommit(commit)}
-              >
-                <div className="flex items-baseline gap-2">
-                  <span className="shrink-0 font-mono text-[11px] text-muted">
-                    {commit.hash.slice(0, 7)}
-                  </span>
-                  <span className="truncate text-[13px] text-ink/90">
-                    {commit.subject}
-                  </span>
-                </div>
-                <div className="text-[10px] text-muted">
-                  {commit.author} · {formatDate(commit.time)}
-                </div>
-              </li>
-            ))}
-            {commits.length === 0 && (
-              <li className="px-3 py-2 text-xs italic text-muted">
-                nenhum commit
-              </li>
-            )}
-          </ul>
-        </section>
+        <div
+          className="mb-2 min-h-0 shrink-0 overflow-hidden rounded-lg border border-line bg-surface"
+          style={{ height: diffHeight }}
+        >
+          <DiffPanel
+            selected={selectedCommit}
+            diff={diff}
+            loading={diffLoading}
+            error={diffError}
+            onCopy={() => void copyDiff()}
+            copied={copiedDiff}
+          />
+        </div>
+      </div>
 
-        <section className={panelClass}>
-          <header className={panelHeaderClass}>
-            <h2 className={panelTitleClass}>Status</h2>
-            <span className="text-[10px] tabular-nums text-muted">
-              {files.length}
-            </span>
-          </header>
-          <ul className={listClass}>
-            {files.map((file) => (
-              <li
-                key={`${file.path}:${fileCode(file)}`}
-                className="flex items-center gap-2 px-3 py-1.5 transition hover:bg-surface-2"
-              >
-                <span
-                  className={`w-5 shrink-0 font-mono text-[11px] ${codeColor(
-                    file,
-                  )}`}
-                >
-                  {fileCode(file)}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink/90">
-                  {file.path}
-                </span>
-                <span className="flex shrink-0 gap-1">
-                  {(file.untracked ||
-                    file.unmerged ||
-                    hasWorktreeChange(file)) && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void runAction(
-                          ["stage", file.path],
-                          `stage: ${file.path}`,
-                          false,
-                        )
-                      }
-                      className={buttonClass}
-                    >
-                      Stage
-                    </button>
-                  )}
-                  {isStaged(file) && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void runAction(
-                          ["unstage", file.path],
-                          `unstage: ${file.path}`,
-                          false,
-                        )
-                      }
-                      className={buttonClass}
-                    >
-                      Unstage
-                    </button>
-                  )}
-                </span>
-              </li>
-            ))}
-            {files.length === 0 && (
-              <li className="px-3 py-2 text-xs italic text-muted">
-                working tree limpo
-              </li>
-            )}
-          </ul>
+      <StatusBar
+        status={status}
+        repo={repo}
+        onOpenPalette={() => setPaletteOpen(true)}
+      />
 
-          <form
-            className="flex gap-2 border-t border-line bg-surface-2 p-2"
-            onSubmit={(e) => void submitCommit(e)}
-          >
-            <input
-              value={commitMessage}
-              onChange={(event) => setCommitMessage(event.currentTarget.value)}
-              placeholder="mensagem do commit"
-              disabled={busy}
-              className={`${inputClass} flex-1`}
-            />
-            <button
-              type="submit"
-              disabled={busy || !commitMessage.trim()}
-              className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Commit
-            </button>
-          </form>
-        </section>
-      </main>
+      <ConfirmDialog
+        open={pending !== null}
+        title={pending?.title ?? ""}
+        description={pending?.description}
+        confirmLabel={pending?.confirmLabel}
+        busy={busy}
+        onConfirm={() => void executePending()}
+        onClose={() => {
+          if (!busy) setPending(null);
+        }}
+      />
 
-      <section className="flex h-[28vh] min-h-[140px] max-h-[300px] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl shadow-black/20">
-        <header className={panelHeaderClass}>
-          <h2 className={panelTitleClass}>
-            {selectedCommit
-              ? `Diff ${selectedCommit.hash.slice(0, 7)}`
-              : "Diff"}
-          </h2>
-        </header>
-        {selectedCommit ? (
-          diff ? (
-            <DiffView diff={diff} />
-          ) : (
-            <p className="px-3 py-2 text-xs text-muted">carregando…</p>
-          )
-        ) : (
-          <p className="px-3 py-2 text-xs text-muted">
-            Selecione um commit para ver o diff.
-          </p>
-        )}
-      </section>
+      <CommandPalette
+        open={paletteOpen}
+        commands={commands}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   );
 }
