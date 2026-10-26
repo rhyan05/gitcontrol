@@ -77,4 +77,5 @@ func (r *Repo) run(ctx context.Context, args ...string) (stdout, stderr []byte, 
 	//    Retornamos os três — o chamador decide o que fazer.
 	runErr := cmd.Run()
 	return outBuf.Bytes(), errBuf.Bytes(), runErr
+
 }
