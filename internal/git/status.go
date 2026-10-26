@@ -142,7 +142,6 @@ func parseChanged(line string) (FileStatus, error) {
 		Path:       path,
 		IndexXY:    string(xy[0]),
 		WorktreeXY: string(xy[1]),
-		IsUnmerged: true,
 	}, nil
 }
 

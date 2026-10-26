@@ -1,5 +1,7 @@
 package git
 
+import "time"
+
 // FileStatus descreve o estado de um arquivo no working tree.
 type FileStatus struct {
 	Path        string `json:"path"`
@@ -34,5 +36,5 @@ type Branch struct {
 	Name     string `json:"name"`
 	Upstream string `json:"upstream,omitempty"`
 	IsHead   bool   `json:"head,omitempty"`
-	IsRemote bool   `json:"remote,omitempty"`  // true se começa com "origin/" etc
+	IsRemote bool   `json:"remote,omitempty"` // true se começa com "origin/" etc
 }
