@@ -164,6 +164,8 @@ func TestUsageErrors(t *testing.T) {
 		{"desconhecido"},
 		{"show"},
 		{"checkout"},
+		{"merge"},
+		{"cherry-pick"},
 		{"stage"},
 		{"unstage"},
 		{"commit"},
@@ -218,6 +220,64 @@ func TestCheckoutAction(t *testing.T) {
 	}
 	if st.Branch != base {
 		t.Errorf("branch = %q, esperava %q", st.Branch, base)
+	}
+}
+
+func TestMergeAction(t *testing.T) {
+	r, dir := newRepo(t)
+	writeAndCommit(t, dir, "base.txt", "base", "base")
+
+	st, err := r.Status(t.Context())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	base := st.Branch
+
+	runGit(t, dir, "checkout", "-b", "feature")
+	writeAndCommit(t, dir, "feature.txt", "feature", "feature")
+	runGit(t, dir, "checkout", base)
+
+	resp, code := runCLI(t, r, "merge", "feature")
+	if code != 0 || !resp.OK {
+		t.Fatalf("merge falhou: code=%d resp=%+v", code, resp)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); err != nil {
+		t.Errorf("feature.txt não existe depois do merge: %v", err)
+	}
+}
+
+func TestCherryPickAction(t *testing.T) {
+	r, dir := newRepo(t)
+	writeAndCommit(t, dir, "base.txt", "base", "base")
+
+	st, err := r.Status(t.Context())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	base := st.Branch
+
+	runGit(t, dir, "checkout", "-b", "feature")
+	writeAndCommit(t, dir, "feature.txt", "feature", "feature commit")
+
+	commits, err := r.Log(t.Context(), 1)
+	if err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	hash := commits[0].Hash
+
+	runGit(t, dir, "checkout", base)
+
+	resp, code := runCLI(t, r, "cherry-pick", hash)
+	if code != 0 || !resp.OK {
+		t.Fatalf("cherry-pick falhou: code=%d resp=%+v", code, resp)
+	}
+
+	commits, err = r.Log(t.Context(), 1)
+	if err != nil {
+		t.Fatalf("Log depois: %v", err)
+	}
+	if commits[0].Subject != "feature commit" {
+		t.Errorf("Subject = %q, esperava feature commit", commits[0].Subject)
 	}
 }
 

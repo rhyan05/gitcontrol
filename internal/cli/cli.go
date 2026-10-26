@@ -19,7 +19,7 @@ import (
 	"github.com/rhyan05/gerenciador-git/internal/git"
 )
 
-const usage = "uso: gg --json <status|log|branches|show|checkout|stage|unstage|commit>"
+const usage = "uso: gg --json <status|log|branches|show|checkout|merge|cherry-pick|stage|unstage|commit>"
 
 // success e failure são structs separados para o JSON de sucesso sempre ter
 // "data" (mesmo que null) e o de erro sempre ter "error".
@@ -100,6 +100,24 @@ func Run(repo *git.Repo, args []string, out io.Writer) int {
 			return fail(out, "usage", "uso: gg --json checkout <branch>")
 		}
 		if err := repo.Checkout(ctx, rest[0]); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "merge":
+		if len(rest) != 1 {
+			return fail(out, "usage", "uso: gg --json merge <branch>")
+		}
+		if err := repo.Merge(ctx, rest[0]); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "cherry-pick":
+		if len(rest) != 1 {
+			return fail(out, "usage", "uso: gg --json cherry-pick <hash>")
+		}
+		if err := repo.CherryPick(ctx, rest[0]); err != nil {
 			return failGit(out, err)
 		}
 		return ok(out, nil)
