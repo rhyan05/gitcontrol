@@ -121,14 +121,66 @@ func (r *Repo) Commit(ctx context.Context, message string) error {
 
 	stdout, stderr, err := r.run(ctx, "commit", "-m", message)
 	if err != nil {
-		detail := strings.TrimSpace(string(stderr))
-		if detail == "" {
-			detail = strings.TrimSpace(string(stdout))
-		}
-		if detail == "" {
-			return fmt.Errorf("git commit: %w", err)
-		}
-		return fmt.Errorf("git commit: %w (%s)", err, detail)
+		return gitError("git commit", stdout, stderr, err)
 	}
 	return nil
+}
+
+// Merge incorpora a branch informada na branch atual (git merge).
+//
+// --no-edit evita abrir editor para a mensagem do merge commit: a TUI roda
+// sem stdin interativo. A estratégia é a padrão do git (fast-forward quando
+// possível, merge commit quando as branches divergiram).
+//
+// Em conflito, o git deixa o repositório em estado de merge (MERGE_HEAD) e
+// a TUI apenas reporta o erro; a resolução fica no terminal.
+func (r *Repo) Merge(ctx context.Context, branch string) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("git merge: branch vazia")
+	}
+
+	stdout, stderr, err := r.run(ctx, "merge", "--no-edit", branch)
+	if err != nil {
+		// Conflito é reportado no stdout ("CONFLICT ..."), não no stderr.
+		return gitError("git merge "+branch, stdout, stderr, err)
+	}
+	return nil
+}
+
+// CherryPick aplica o commit informado na branch atual (git cherry-pick).
+//
+// --no-edit mantém a mensagem original sem abrir editor. Em conflito, o repo
+// fica em estado de cherry-pick (CHERRY_PICK_HEAD) e o chamador decide como
+// resolver/abortar.
+func (r *Repo) CherryPick(ctx context.Context, hash string) error {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return fmt.Errorf("git cherry-pick: hash vazio")
+	}
+
+	stdout, stderr, err := r.run(ctx, "cherry-pick", "--no-edit", hash)
+	if err != nil {
+		return gitError("git cherry-pick "+hash, stdout, stderr, err)
+	}
+	return nil
+}
+
+// gitError monta um erro com a mensagem mais útil do git.
+// Dependendo do comando, a explicação fica no stderr ou no stdout (merge e
+// cherry-pick, por exemplo, escrevem "CONFLICT" no stdout e detalhes de
+// rerere no stderr). Por isso juntamos os dois, sem duplicar vazios.
+func gitError(op string, stdout, stderr []byte, err error) error {
+	parts := make([]string, 0, 2)
+	for _, raw := range [][]byte{stdout, stderr} {
+		part := strings.TrimSpace(string(raw))
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+
+	if len(parts) == 0 {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	return fmt.Errorf("%s: %w (%s)", op, err, strings.Join(parts, "\n"))
 }
