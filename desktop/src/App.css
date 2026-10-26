@@ -126,6 +126,34 @@ input {
   white-space: pre-wrap;
 }
 
+.notice {
+  padding: 9px 12px;
+  border: 1px solid #245c3a;
+  border-radius: 6px;
+  background: #12251a;
+  color: var(--green);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+.confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid #5c4d24;
+  border-radius: 6px;
+  background: #262112;
+  color: var(--yellow);
+}
+
+.confirm > div {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
 .panels {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -171,6 +199,41 @@ input {
   color: var(--muted);
 }
 
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.panel-tools button,
+.file-actions button,
+.commit-form button,
+.confirm button {
+  padding: 2px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  background: #202633;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.panel-tools button:hover:not(:disabled),
+.file-actions button:hover:not(:disabled),
+.commit-form button:hover:not(:disabled),
+.confirm button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.panel-tools button:disabled,
+.file-actions button:disabled,
+.commit-form button:disabled,
+.confirm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .panel ul {
   flex: 1;
   margin: 0;
@@ -185,7 +248,7 @@ input {
   gap: 8px;
   padding: 5px 12px;
   border-left: 2px solid transparent;
-  cursor: default;
+  cursor: pointer;
 }
 
 .panel li:hover {
@@ -268,6 +331,36 @@ input {
 .muted {
   color: var(--muted);
   font-size: 12px;
+}
+
+.file-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+
+.commit-form {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.commit-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  background: #12151b;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.commit-form input:focus {
+  border-color: var(--accent);
+  outline: none;
 }
 
 .diff {
