@@ -1,7 +1,40 @@
-# Tauri + React + Typescript
+# gg desktop
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Interface Tauri + React do [gg](../README.md).
 
-## Recommended IDE Setup
+![Interface](docs/gg.png)
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Desenvolvimento
+
+```powershell
+npm install
+npm run tauri -- dev
+```
+
+O Tauri executa `npm run sidecar` antes de iniciar: o binário Go é compilado em
+`src-tauri/binaries/gg-cli-<target-triple>.exe` e embarcado como sidecar.
+
+## Scripts
+
+| Script | Função |
+|---|---|
+| `npm run dev` | Vite puro (sem Tauri) |
+| `npm run sidecar` | compila o CLI Go com o sufixo do target |
+| `npm run tauri -- dev` | app desktop em modo desenvolvimento |
+| `npm run tauri -- build` | release + MSI + NSIS |
+| `npm run lint` | ESLint |
+| `npm run test` | Vitest + Testing Library |
+| `npm run build` | typecheck + build do frontend |
+
+## Estrutura
+
+```text
+src/
+  components/ui/   Button, Panel, Toast, ConfirmDialog, Skeleton, ...
+  features/        branches, commits, status, diff, repo, command palette
+  hooks/useRepo.ts dados + polling curto + refresh silencioso
+  lib/             sidecar client, seletores, formatadores, cn()
+```
+
+A UI é uma casca fina sobre o contrato `gg --json`; toda a lógica de Git fica no
+core Go e é coberta pelos testes dele.
