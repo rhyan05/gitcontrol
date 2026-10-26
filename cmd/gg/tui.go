@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -86,6 +87,14 @@ type model struct {
 	// tea.WindowSizeMsg quando o terminal é redimensionado.
 	width, height int
 	loaded        bool
+
+	// Painel de diff do commit selecionado (5a/5b).
+	// diffOpen controla a visibilidade; diffHash guarda qual commit foi
+	// pedido para descartar respostas atrasadas de outro commit.
+	diffOpen bool
+	diff     string
+	diffErr  error
+	diffHash string
 }
 
 // loadedMsg é a resposta de loadAll: um "pacote" com tudo que a tela precisa.
@@ -97,6 +106,13 @@ type loadedMsg struct {
 	commitsErr  error
 	status      *git.StatusResult
 	statusErr   error
+}
+
+// diffMsg é a resposta assíncrona de git show para o painel de diff.
+type diffMsg struct {
+	hash string
+	text string
+	err  error
 }
 
 // run abre o repositório do diretório atual e inicia o loop do Bubbletea.
@@ -142,8 +158,10 @@ func (m model) Init() tea.Cmd {
 // Update trata eventos. Deve ser puro: nada de I/O, nada de Print.
 // Eventos tratados hoje:
 //   - WindowSizeMsg: o terminal mudou de tamanho (recalcula larguras/alturas);
-//   - KeyMsg: q sai, tab/shift+tab trocam o foco, j/k movem o cursor;
-//   - loadedMsg: chegada dos dados do loadAll.
+//   - KeyMsg: q sai, tab/shift+tab trocam o foco, j/k movem o cursor,
+//     enter abre o diff do commit e esc fecha;
+//   - loadedMsg: chegada dos dados do loadAll;
+//   - diffMsg: chegada do diff pedido ao git show.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -163,6 +181,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor[m.focus] = moveCursor(m.cursor[m.focus], 1, m.count(m.focus))
 		case "k":
 			m.cursor[m.focus] = moveCursor(m.cursor[m.focus], -1, m.count(m.focus))
+		case "enter":
+			// O diff só faz sentido no painel de commits. Nos outros,
+			// enter será usado por checkout/stage nos próximos blocos.
+			if cmd := m.showSelectedCommit(); cmd != nil {
+				return m, cmd
+			}
+		case "esc":
+			// Fechar também limpa diffHash: respostas em voo serão
+			// descartadas quando chegarem.
+			m.diffOpen = false
+			m.diff = ""
+			m.diffErr = nil
+			m.diffHash = ""
 		}
 	case loadedMsg:
 		// Copia os dados para o model. A partir daqui View já pode renderizar.
@@ -173,12 +204,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commitsErr = msg.commitsErr
 		m.statusErr = msg.statusErr
 		m.loaded = true
+	case diffMsg:
+		// Descarta resposta atrasada se o painel foi fechado ou se outro
+		// commit foi selecionado enquanto este git show rodava.
+		if !m.diffOpen || m.diffHash != msg.hash {
+			return m, nil
+		}
+		m.diff = msg.text
+		m.diffErr = msg.err
 	}
 	return m, nil
 }
 
-// View monta a tela: os três painéis lado a lado em cima e o rodapé embaixo.
-// É chamada a cada frame, então não faz I/O nem aloca coisas caras.
+// showSelectedCommit prepara o model e devolve o tea.Cmd que roda git show.
+//
+// Recebe *model para poder marcar diffOpen/diffHash no model local do Update;
+// o I/O em si acontece dentro da closure, nunca aqui.
+func (m *model) showSelectedCommit() tea.Cmd {
+	if m.focus != focusCommits || len(m.commits) == 0 {
+		return nil
+	}
+
+	hash := m.commits[m.cursor[focusCommits]].Hash
+	m.diffOpen = true
+	m.diff = "carregando..."
+	m.diffErr = nil
+	m.diffHash = hash
+
+	repo := m.repo
+	return func() tea.Msg {
+		text, err := repo.Show(context.Background(), hash)
+		return diffMsg{hash: hash, text: text, err: err}
+	}
+}
+
+// View monta a tela: os três painéis lado a lado em cima, o diff (quando
+// aberto) no meio e o rodapé embaixo. Chamada a cada frame, então não faz I/O.
 func (m model) View() string {
 	if !m.loaded {
 		return "carregando...\n"
@@ -193,10 +254,17 @@ func (m model) View() string {
 		m.renderPanel(focusStatus, "== Status ==", m.statusLines(), h),
 	)
 
-	// O rodapé também é truncado para nunca quebrar linha em terminal estreito.
-	footer := footerStyle.Render(truncate("q sair │ tab painel │ j/k mover", m.width))
+	views := []string{panels}
+	help := "q sair │ tab painel │ j/k mover │ enter diff"
+	if m.diffOpen {
+		views = append(views, m.renderDiffPanel())
+		help = "esc fechar │ q sair │ tab painel │ j/k mover"
+	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, panels, footer)
+	// O rodapé também é truncado para nunca quebrar linha em terminal estreito.
+	views = append(views, footerStyle.Render(truncate(help, m.width)))
+
+	return lipgloss.JoinVertical(lipgloss.Left, views...)
 }
 
 // panelWidth calcula a largura interna de cada painel.
@@ -214,14 +282,72 @@ func (m model) panelWidth() int {
 
 // panelHeight calcula a altura interna dos painéis.
 //
-// m.height inclui as bordas de cima/baixo (1 célula cada) e o rodapé (1 linha).
-// Logo: altura interna = altura total - 3. Mínimo de 3 para caber título + linhas.
+// Sem diff: m.height inclui as bordas de cima/baixo (2) e o rodapé (1),
+// logo altura interna = m.height - 3.
+//
+// Com diff: além das bordas dos painéis (2) e do rodapé (1), entram as duas
+// bordas do painel de diff. O espaço restante é dividido com diffHeight().
 func (m model) panelHeight() int {
 	h := m.height - 3
+	if m.diffOpen {
+		h = m.height - 5 - m.diffHeight()
+	}
 	if h < 3 {
 		h = 3
 	}
 	return h
+}
+
+// diffHeight calcula a altura interna do painel de diff: ~40% do espaço útil.
+// O mínimo de 4 garante título + pelo menos três linhas de patch.
+func (m model) diffHeight() int {
+	h := (m.height - 5) * 2 / 5
+	if h < 4 {
+		h = 4
+	}
+	return h
+}
+
+// renderDiffPanel desenha o diff do commit selecionado usando a largura toda.
+//
+// Mostramos apenas as primeiras linhas que cabem na altura calculada. O diff
+// é somente leitura nesta etapa; scroll vem junto com o Bloco 5 completo.
+func (m model) renderDiffPanel() string {
+	width := m.width - 2 // desconta as duas bordas verticais
+	if width < 8 {
+		width = 8
+	}
+	height := m.diffHeight()
+
+	title := "== Diff =="
+	if m.diffHash != "" {
+		title = "== Diff " + shortHash(m.diffHash) + " =="
+	}
+
+	var lines []string
+	switch {
+	case m.diffErr != nil:
+		lines = []string{"erro: " + m.diffErr.Error()}
+	case m.diff == "":
+		lines = []string{"(diff vazio)"}
+	default:
+		lines = strings.Split(m.diff, "\n")
+	}
+
+	body := titleStyle.Render(title)
+	maxLines := height - 1 // o título ocupa a primeira linha
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	for _, line := range lines {
+		// width-2 é a área útil depois do padding horizontal de 1 de cada lado.
+		body += "\n" + truncate(line, width-2)
+	}
+
+	return focusedStyle.
+		Width(width).
+		Height(height).
+		Render(body)
 }
 
 // renderPanel devolve uma caixa pronta (borda + título + linhas).
