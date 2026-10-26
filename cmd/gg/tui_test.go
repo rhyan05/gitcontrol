@@ -183,11 +183,14 @@ func TestCheckoutConfirmFlow(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(model)
-	if got.mode != modeConfirmCheckout {
-		t.Fatalf("modo = %v, esperava modeConfirmCheckout", got.mode)
+	if got.mode != modeConfirm {
+		t.Fatalf("modo = %v, esperava modeConfirm", got.mode)
 	}
-	if got.pendingBranch != "feature" {
-		t.Errorf("pendingBranch = %q, esperava feature", got.pendingBranch)
+	if got.pendingAction != actionCheckout {
+		t.Errorf("pendingAction = %v, esperava actionCheckout", got.pendingAction)
+	}
+	if got.pendingTarget != "feature" {
+		t.Errorf("pendingTarget = %q, esperava feature", got.pendingTarget)
 	}
 
 	next, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
@@ -206,14 +209,15 @@ func TestCheckoutCancel(t *testing.T) {
 		focus:         focusBranches,
 		branches:      []git.Branch{{Name: "feature"}},
 		loaded:        true,
-		mode:          modeConfirmCheckout,
-		pendingBranch: "feature",
+		mode:          modeConfirm,
+		pendingAction: actionCheckout,
+		pendingTarget: "feature",
 	}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	got := next.(model)
-	if got.mode != modeNormal || got.pendingBranch != "" {
-		t.Errorf("n deveria cancelar: mode=%v branch=%q", got.mode, got.pendingBranch)
+	if got.mode != modeNormal || got.pendingTarget != "" {
+		t.Errorf("n deveria cancelar: mode=%v target=%q", got.mode, got.pendingTarget)
 	}
 	if cmd != nil {
 		t.Error("n não deveria disparar comando")
@@ -249,8 +253,104 @@ func TestRemoteCheckoutFooterMentionsLocalBranch(t *testing.T) {
 	if !got.pendingRemote {
 		t.Error("pendingRemote deveria ser true")
 	}
+	if got.pendingAction != actionCheckout {
+		t.Errorf("pendingAction = %v, esperava actionCheckout", got.pendingAction)
+	}
 	if !strings.Contains(got.footerText(), "cria branch local") {
 		t.Errorf("footer = %q, esperava mencionar a branch local", got.footerText())
+	}
+}
+
+func TestMergeConfirmFlow(t *testing.T) {
+	m := model{
+		repo:     git.New("."),
+		focus:    focusBranches,
+		branches: []git.Branch{{Name: "main", IsHead: true}, {Name: "feature"}},
+		status:   &git.StatusResult{Branch: "main"},
+		loaded:   true,
+	}
+	m.cursor[focusBranches] = 1 // feature
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("M")})
+	got := next.(model)
+
+	if got.mode != modeConfirm {
+		t.Fatalf("M deveria abrir confirmação: modo = %v", got.mode)
+	}
+	if got.pendingAction != actionMerge {
+		t.Errorf("pendingAction = %v, esperava actionMerge", got.pendingAction)
+	}
+	if got.pendingTarget != "feature" {
+		t.Errorf("pendingTarget = %q, esperava feature", got.pendingTarget)
+	}
+	if !strings.Contains(got.footerText(), "merge feature em main") {
+		t.Errorf("footer = %q", got.footerText())
+	}
+
+	next, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if cmd == nil {
+		t.Error("y deveria disparar o merge")
+	}
+	if mode := next.(model).mode; mode != modeNormal {
+		t.Errorf("modo = %v, esperava modeNormal", mode)
+	}
+}
+
+func TestCherryPickConfirmFlow(t *testing.T) {
+	hash := "abcdef1234567890"
+	m := model{
+		repo:    git.New("."),
+		focus:   focusCommits,
+		commits: []git.Commit{{Hash: hash}},
+		status:  &git.StatusResult{Branch: "main"},
+		loaded:  true,
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
+	got := next.(model)
+
+	if got.mode != modeConfirm {
+		t.Fatalf("C deveria abrir confirmação: modo = %v", got.mode)
+	}
+	if got.pendingAction != actionCherryPick {
+		t.Errorf("pendingAction = %v, esperava actionCherryPick", got.pendingAction)
+	}
+	if got.pendingTarget != hash {
+		t.Errorf("pendingTarget = %q, esperava %q", got.pendingTarget, hash)
+	}
+	if !strings.Contains(got.footerText(), "cherry-pick abcdef1 em main") {
+		t.Errorf("footer = %q", got.footerText())
+	}
+
+	next, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if cmd == nil {
+		t.Error("y deveria disparar o cherry-pick")
+	}
+	if mode := next.(model).mode; mode != modeNormal {
+		t.Errorf("modo = %v, esperava modeNormal", mode)
+	}
+}
+
+func TestMergeAndCherryPickIgnoredOutsidePanel(t *testing.T) {
+	base := model{
+		repo:     git.New("."),
+		branches: []git.Branch{{Name: "feature"}},
+		commits:  []git.Commit{{Hash: "abcdef"}},
+		loaded:   true,
+	}
+
+	// M fora de branches
+	base.focus = focusCommits
+	next, _ := base.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("M")})
+	if mode := next.(model).mode; mode != modeNormal {
+		t.Errorf("M em commits não deveria abrir confirmação")
+	}
+
+	// C fora de commits
+	base.focus = focusBranches
+	next, _ = base.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
+	if mode := next.(model).mode; mode != modeNormal {
+		t.Errorf("C em branches não deveria abrir confirmação")
 	}
 }
 

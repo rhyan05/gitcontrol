@@ -23,13 +23,22 @@ const (
 )
 
 // uiMode separa a tela normal dos fluxos que capturam teclas:
-// confirmação de checkout e digitação da mensagem de commit.
+// confirmação de uma ação e digitação da mensagem de commit.
 type uiMode int
 
 const (
 	modeNormal uiMode = iota
-	modeConfirmCheckout
+	modeConfirm
 	modeCommitInput
+)
+
+// confirmAction lembra qual ação o usuário confirmou com y.
+type confirmAction int
+
+const (
+	actionCheckout confirmAction = iota
+	actionMerge
+	actionCherryPick
 )
 
 // Estilos estáticos da TUI.
@@ -116,11 +125,12 @@ type model struct {
 	diffLabel  string
 	diffScroll int
 
-	// Estado dos fluxos interativos (5c-5e).
+	// Estado dos fluxos interativos (5c-5e + merge/cherry-pick).
 	// mode evita que "q", "j" etc. sejam tratados como teclas globais
-	// enquanto o usuário confirma um checkout ou digita uma mensagem.
+	// enquanto o usuário confirma uma ação ou digita uma mensagem.
 	mode          uiMode
-	pendingBranch string
+	pendingAction confirmAction
+	pendingTarget string // branch ou hash da ação confirmada
 	pendingRemote bool
 	commitText    string
 	notice        string
@@ -234,8 +244,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeCommitInput:
 			return m.updateCommitInput(msg)
-		case modeConfirmCheckout:
-			return m.updateCheckoutConfirm(msg)
+		case modeConfirm:
+			return m.updateConfirm(msg)
 		}
 
 		switch msg.String() {
@@ -272,6 +282,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = modeCommitInput
 			m.commitText = ""
 			m.notice = ""
+		case "M":
+			// Merge da branch selecionada na branch atual (com confirmação).
+			m.startMerge()
+		case "C":
+			// Cherry-pick do commit selecionado (com confirmação).
+			m.startCherryPick()
 		case "d":
 			// Diff do arquivo selecionado no working tree (5f).
 			if cmd := m.showSelectedFile(); cmd != nil {
@@ -376,14 +392,14 @@ func (m model) updateCommitInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateCheckoutConfirm trata y/n/esc enquanto a confirmação está aberta.
-func (m model) updateCheckoutConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// updateConfirm trata y/n/esc enquanto a confirmação está aberta.
+func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
-		return m, m.doCheckout()
+		return m, m.runConfirmed()
 	case "n", "esc":
 		m.mode = modeNormal
-		m.pendingBranch = ""
+		m.pendingTarget = ""
 		m.pendingRemote = false
 		m.notice = ""
 	}
@@ -398,26 +414,73 @@ func (m *model) startCheckout() {
 	}
 
 	b := m.branches[m.cursor[focusBranches]]
-	m.pendingBranch = b.Name
+	m.mode = modeConfirm
+	m.pendingAction = actionCheckout
+	m.pendingTarget = b.Name
 	m.pendingRemote = b.IsRemote
-	m.mode = modeConfirmCheckout
 	m.notice = ""
 }
 
-// doCheckout devolve o tea.Cmd que executa o checkout confirmado.
-// Para branch remota, o core cria a local de tracking automaticamente.
-func (m *model) doCheckout() tea.Cmd {
-	branch := m.pendingBranch
+// startMerge arma o merge da branch selecionada na branch atual.
+func (m *model) startMerge() {
+	if m.focus != focusBranches || len(m.branches) == 0 {
+		return
+	}
+
+	b := m.branches[m.cursor[focusBranches]]
+	m.mode = modeConfirm
+	m.pendingAction = actionMerge
+	m.pendingTarget = b.Name
+	m.pendingRemote = b.IsRemote
+	m.notice = ""
+}
+
+// startCherryPick arma o cherry-pick do commit selecionado.
+// pendingTarget guarda o hash completo; o footer mostra só os 7 primeiros.
+func (m *model) startCherryPick() {
+	if m.focus != focusCommits || len(m.commits) == 0 {
+		return
+	}
+
+	hash := m.commits[m.cursor[focusCommits]].Hash
+	m.mode = modeConfirm
+	m.pendingAction = actionCherryPick
+	m.pendingTarget = hash
+	m.pendingRemote = false
+	m.notice = ""
+}
+
+// runConfirmed executa a ação que estava aguardando y.
+// O I/O acontece na closure; Update apenas lê o resultado via actionMsg.
+func (m *model) runConfirmed() tea.Cmd {
+	action := m.pendingAction
+	target := m.pendingTarget
+
 	m.mode = modeNormal
-	m.pendingBranch = ""
+	m.pendingTarget = ""
 	m.pendingRemote = false
 
 	repo := m.repo
 	return func() tea.Msg {
-		if err := repo.Checkout(context.Background(), branch); err != nil {
+		var err error
+		notice := ""
+
+		switch action {
+		case actionCheckout:
+			err = repo.Checkout(context.Background(), target)
+			notice = "checkout: " + target
+		case actionMerge:
+			err = repo.Merge(context.Background(), target)
+			notice = "merge: " + target
+		case actionCherryPick:
+			err = repo.CherryPick(context.Background(), target)
+			notice = "cherry-pick: " + shortHash(target)
+		}
+
+		if err != nil {
 			return actionMsg{err: err}
 		}
-		return actionMsg{notice: "checkout: " + branch}
+		return actionMsg{notice: notice}
 	}
 }
 
@@ -566,14 +629,23 @@ func (m model) footerText() string {
 	switch m.mode {
 	case modeCommitInput:
 		text = fmt.Sprintf("commit> %s │ enter commitar │ esc cancelar", m.commitText)
-	case modeConfirmCheckout:
-		text = "checkout " + m.pendingBranch + "?"
-		if m.pendingRemote {
-			text += " cria branch local"
+	case modeConfirm:
+		switch m.pendingAction {
+		case actionCheckout:
+			text = "checkout " + m.pendingTarget + "?"
+			if m.pendingRemote {
+				text += " cria branch local"
+			}
+		case actionMerge:
+			text = "merge " + m.pendingTarget + " em " + m.currentBranch() + "?"
+		case actionCherryPick:
+			text = "cherry-pick " + shortHash(m.pendingTarget) + " em " + m.currentBranch() + "?"
 		}
 		text += " (y/n)"
 	default:
-		text = "q sair │ tab painel │ j/k mover │ enter abrir │ d diff │ s/u stage │ c commit"
+		// Ordem proposital: ações (merge/cherry-pick) antes das teclas de
+		// navegação, para não serem cortadas em terminal de 80 colunas.
+		text = "q sair │ tab │ j/k │ M merge │ C cherry-pick │ enter │ d diff │ s/u stage │ c commit"
 		if m.diffOpen {
 			text = "esc fechar │ pgup/pgdn scroll │ home/end topo/fim │ q sair"
 		}
@@ -583,6 +655,15 @@ func (m model) footerText() string {
 		text = m.notice + " │ " + text
 	}
 	return text
+}
+
+// currentBranch é o alvo do merge/cherry-pick exibido na confirmação.
+// Fallback "HEAD" cobre repo sem commits ou detached HEAD.
+func (m model) currentBranch() string {
+	if m.status == nil || m.status.Branch == "" {
+		return "HEAD"
+	}
+	return m.status.Branch
 }
 
 // panelWidth calcula a largura interna de cada painel.
