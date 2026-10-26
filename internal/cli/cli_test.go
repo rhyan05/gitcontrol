@@ -163,6 +163,10 @@ func TestUsageErrors(t *testing.T) {
 		nil,
 		{"desconhecido"},
 		{"show"},
+		{"checkout"},
+		{"stage"},
+		{"unstage"},
+		{"commit"},
 		{"status", "extra"},
 	}
 	for _, args := range tests {
@@ -189,5 +193,84 @@ func TestBrokenRepo(t *testing.T) {
 	}
 	if resp.Error == nil || resp.Error.Code != "not_a_repo" {
 		t.Errorf("error = %+v, esperava code=not_a_repo", resp.Error)
+	}
+}
+
+func TestCheckoutAction(t *testing.T) {
+	r, dir := newRepo(t)
+	writeAndCommit(t, dir, "a.txt", "v1", "primeiro")
+
+	st, err := r.Status(t.Context())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	base := st.Branch
+	runGit(t, dir, "checkout", "-b", "feature")
+
+	resp, code := runCLI(t, r, "checkout", base)
+	if code != 0 || !resp.OK {
+		t.Fatalf("checkout falhou: code=%d resp=%+v", code, resp)
+	}
+
+	st, err = r.Status(t.Context())
+	if err != nil {
+		t.Fatalf("Status depois: %v", err)
+	}
+	if st.Branch != base {
+		t.Errorf("branch = %q, esperava %q", st.Branch, base)
+	}
+}
+
+func TestStageUnstageCommitActions(t *testing.T) {
+	r, dir := newRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("v1"), 0o644); err != nil {
+		t.Fatalf("escrever: %v", err)
+	}
+
+	// stage
+	resp, code := runCLI(t, r, "stage", "a.txt")
+	if code != 0 || !resp.OK {
+		t.Fatalf("stage falhou: code=%d resp=%+v", code, resp)
+	}
+	if string(resp.Data) != "null" {
+		t.Errorf("data de ação = %s, esperava null", resp.Data)
+	}
+
+	st, err := r.Status(t.Context())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(st.Files) != 1 || st.Files[0].IndexXY != "A" {
+		t.Fatalf("depois do stage: %+v", st.Files)
+	}
+
+	// unstage
+	resp, code = runCLI(t, r, "unstage", "a.txt")
+	if code != 0 || !resp.OK {
+		t.Fatalf("unstage falhou: code=%d resp=%+v", code, resp)
+	}
+
+	st, err = r.Status(t.Context())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(st.Files) != 1 || !st.Files[0].IsUntracked {
+		t.Fatalf("depois do unstage: %+v", st.Files)
+	}
+
+	// stage de novo + commit (mensagem em vários args)
+	if resp, code = runCLI(t, r, "stage", "a.txt"); code != 0 || !resp.OK {
+		t.Fatalf("segundo stage falhou: %+v", resp)
+	}
+	if resp, code = runCLI(t, r, "commit", "primeiro", "commit"); code != 0 || !resp.OK {
+		t.Fatalf("commit falhou: %+v", resp)
+	}
+
+	commits, err := r.Log(t.Context(), 10)
+	if err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if len(commits) != 1 || commits[0].Subject != "primeiro commit" {
+		t.Errorf("commits = %+v", commits)
 	}
 }

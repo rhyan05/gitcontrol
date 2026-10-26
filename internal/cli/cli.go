@@ -19,7 +19,7 @@ import (
 	"github.com/rhyan05/gerenciador-git/internal/git"
 )
 
-const usage = "uso: gg --json <status|log|branches|show>"
+const usage = "uso: gg --json <status|log|branches|show|checkout|stage|unstage|commit>"
 
 // success e failure são structs separados para o JSON de sucesso sempre ter
 // "data" (mesmo que null) e o de erro sempre ter "error".
@@ -94,6 +94,43 @@ func Run(repo *git.Repo, args []string, out io.Writer) int {
 			return failGit(out, err)
 		}
 		return ok(out, showData{Hash: rest[0], Diff: diff})
+
+	case "checkout":
+		if len(rest) != 1 {
+			return fail(out, "usage", "uso: gg --json checkout <branch>")
+		}
+		if err := repo.Checkout(ctx, rest[0]); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "stage":
+		if len(rest) == 0 {
+			return fail(out, "usage", "uso: gg --json stage <path...>")
+		}
+		if err := repo.Stage(ctx, rest); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "unstage":
+		if len(rest) == 0 {
+			return fail(out, "usage", "uso: gg --json unstage <path...>")
+		}
+		if err := repo.Unstage(ctx, rest); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "commit":
+		if len(rest) == 0 {
+			return fail(out, "usage", "uso: gg --json commit <mensagem...>")
+		}
+		// Junta os args para permitir `gg --json commit primeira mensagem`.
+		if err := repo.Commit(ctx, strings.Join(rest, " ")); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
 
 	default:
 		return fail(out, "usage", fmt.Sprintf("comando desconhecido: %s", cmd))
