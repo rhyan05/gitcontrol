@@ -82,8 +82,8 @@ func TestEnterOnCommitOpensDiff(t *testing.T) {
 	if !got.diffOpen {
 		t.Error("enter no commit deveria abrir o painel de diff")
 	}
-	if got.diffHash != "abcdef1234567890" {
-		t.Errorf("diffHash = %q, esperava o hash selecionado", got.diffHash)
+	if got.diffKey != "abcdef1234567890" {
+		t.Errorf("diffKey = %q, esperava o hash selecionado", got.diffKey)
 	}
 	if cmd == nil {
 		t.Error("enter no commit deveria disparar um tea.Cmd")
@@ -107,26 +107,27 @@ func TestEnterOutsideCommitsDoesNothing(t *testing.T) {
 }
 
 func TestEscClosesDiff(t *testing.T) {
-	m := model{diffOpen: true, diff: "patch", diffHash: "abcdef", loaded: true}
+	m := model{diffOpen: true, diff: "patch", diffKey: "abcdef", diffLabel: "abcdef", diffScroll: 2, loaded: true}
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	got := next.(model)
 
-	if got.diffOpen || got.diff != "" || got.diffHash != "" {
+	if got.diffOpen || got.diff != "" || got.diffKey != "" || got.diffLabel != "" || got.diffScroll != 0 {
 		t.Errorf("esc deveria fechar e limpar o diff: %+v", got)
 	}
 }
 
 func TestDiffMsgFillsPanel(t *testing.T) {
 	m := model{
-		loaded:   true,
-		width:    120,
-		height:   40,
-		diffOpen: true,
-		diffHash: "abcdef1234567890",
+		loaded:    true,
+		width:     120,
+		height:    40,
+		diffOpen:  true,
+		diffKey:   "abcdef1234567890",
+		diffLabel: "abcdef1",
 	}
 
-	next, _ := m.Update(diffMsg{hash: "abcdef1234567890", text: "conteudo do patch"})
+	next, _ := m.Update(diffMsg{key: "abcdef1234567890", text: "conteudo do patch"})
 	got := next.(model)
 
 	if got.diff != "conteudo do patch" {
@@ -143,7 +144,7 @@ func TestDiffMsgFillsPanel(t *testing.T) {
 func TestLateDiffMsgIsIgnored(t *testing.T) {
 	m := model{loaded: true}
 
-	next, _ := m.Update(diffMsg{hash: "abcdef", text: "velho"})
+	next, _ := m.Update(diffMsg{key: "abcdef", text: "velho"})
 	if got := next.(model); got.diff != "" || got.diffOpen {
 		t.Errorf("resposta sem painel aberto deveria ser ignorada: %+v", got)
 	}
@@ -159,7 +160,7 @@ func TestViewFitsTerminal(t *testing.T) {
 			height:   40,
 			diffOpen: diffOpen,
 			diff:     "linha 1\nlinha 2",
-			diffHash: "abcdef1234567890",
+			diffKey:  "abcdef1234567890",
 		}
 
 		view := m.View()
@@ -343,5 +344,96 @@ func TestCursorClampedAfterReload(t *testing.T) {
 	next, _ := m.Update(loadedMsg{commits: []git.Commit{{Hash: "a"}}})
 	if got := next.(model).cursor[focusCommits]; got != 0 {
 		t.Errorf("cursor = %d, esperava 0 depois do reload", got)
+	}
+}
+
+func TestDKeyOpensFileDiff(t *testing.T) {
+	m := model{
+		repo:       git.New("."),
+		focus:      focusStatus,
+		loaded:     true,
+		status:     &git.StatusResult{Files: []git.FileStatus{{Path: "a.txt"}}},
+		diffScroll: 3,
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	got := next.(model)
+
+	if cmd == nil {
+		t.Fatal("d no status deveria disparar o diff do arquivo")
+	}
+	if !got.diffOpen {
+		t.Error("d deveria abrir o painel de diff")
+	}
+	if got.diffKey != "a.txt" || got.diffLabel != "a.txt" {
+		t.Errorf("diffKey=%q diffLabel=%q, esperava a.txt", got.diffKey, got.diffLabel)
+	}
+	if got.diffScroll != 0 {
+		t.Errorf("scroll = %d, esperava resetar em 0", got.diffScroll)
+	}
+}
+
+func TestDiffMsgResetsScroll(t *testing.T) {
+	m := model{
+		loaded:     true,
+		diffOpen:   true,
+		diffKey:    "abc",
+		diffLabel:  "abc",
+		diffScroll: 4,
+	}
+
+	next, _ := m.Update(diffMsg{key: "abc", text: "linha"})
+	if got := next.(model).diffScroll; got != 0 {
+		t.Errorf("scroll = %d, esperava 0 ao receber novo diff", got)
+	}
+}
+
+func TestClampScroll(t *testing.T) {
+	tests := []struct {
+		name                   string
+		offset, total, visible int
+		want                   int
+	}{
+		{"inicio", 0, 10, 5, 0},
+		{"meio", 5, 10, 5, 5},
+		{"passa do fim", 9, 10, 5, 5},
+		{"negativo", -1, 10, 5, 0},
+		{"conteudo menor", 3, 3, 5, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampScroll(tt.offset, tt.total, tt.visible); got != tt.want {
+				t.Errorf("clampScroll(%d, %d, %d) = %d, esperava %d", tt.offset, tt.total, tt.visible, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiffScrollKeys(t *testing.T) {
+	m := model{
+		loaded:    true,
+		width:     120,
+		height:    20,
+		diffOpen:  true,
+		diffKey:   "abc",
+		diffLabel: "abc",
+		diff:      "a\nb\nc\nd\ne\nf\ng\nh",
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	scrolled := next.(model)
+	if scrolled.diffScroll == 0 {
+		t.Fatal("pgdown deveria rolar o diff")
+	}
+
+	next, _ = scrolled.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	atEnd := next.(model)
+	if atEnd.diffScroll != atEnd.diffMaxScroll() {
+		t.Errorf("end: scroll = %d, esperava %d", atEnd.diffScroll, atEnd.diffMaxScroll())
+	}
+
+	next, _ = atEnd.Update(tea.KeyMsg{Type: tea.KeyHome})
+	if got := next.(model).diffScroll; got != 0 {
+		t.Errorf("home: scroll = %d, esperava 0", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/rhyan05/gerenciador-git/internal/git"
 )
@@ -104,13 +105,16 @@ type model struct {
 	width, height int
 	loaded        bool
 
-	// Painel de diff do commit selecionado (5a/5b).
-	// diffOpen controla a visibilidade; diffHash guarda qual commit foi
-	// pedido para descartar respostas atrasadas de outro commit.
-	diffOpen bool
-	diff     string
-	diffErr  error
-	diffHash string
+	// Painel de diff (5a/5b/5f).
+	// diffOpen controla a visibilidade; diffKey identifica o pedido atual
+	// (hash do commit ou path do arquivo) para descartar respostas atrasadas;
+	// diffLabel é o texto exibido no título. diffScroll é o offset vertical.
+	diffOpen   bool
+	diff       string
+	diffErr    error
+	diffKey    string
+	diffLabel  string
+	diffScroll int
 
 	// Estado dos fluxos interativos (5c-5e).
 	// mode evita que "q", "j" etc. sejam tratados como teclas globais
@@ -120,6 +124,10 @@ type model struct {
 	pendingRemote bool
 	commitText    string
 	notice        string
+
+	// watcher observa .git para refresh automático (Bloco 6). Pode ser nil
+	// quando fsnotify não está disponível; o timer de fallback continua.
+	watcher *fsnotify.Watcher
 }
 
 // actionMsg é a resposta assíncrona de checkout/stage/unstage/commit.
@@ -140,9 +148,10 @@ type loadedMsg struct {
 	statusErr   error
 }
 
-// diffMsg é a resposta assíncrona de git show para o painel de diff.
+// diffMsg é a resposta assíncrona de git show/git diff para o painel.
+// key é o hash do commit ou o path do arquivo que originou o pedido.
 type diffMsg struct {
-	hash string
+	key  string
 	text string
 	err  error
 }
@@ -157,9 +166,20 @@ func run() error {
 		return fmt.Errorf("obter cwd: %w", err)
 	}
 
+	repo := git.New(cwd)
+
+	// Watcher é opcional: se fsnotify falhar (permissão, .git exótico),
+	// seguimos só com o timer de fallback. O defer fecha ao sair da TUI.
+	watcher, watchErr := newGitWatcher(context.Background(), repo)
+	if watchErr == nil {
+		defer watcher.Close()
+	} else {
+		watcher = nil
+	}
+
 	p := tea.NewProgram(
 		// Tamanho inicial de fallback; o WindowSizeMsg real chega logo depois.
-		model{repo: git.New(cwd), width: 80, height: 24},
+		model{repo: repo, watcher: watcher, width: 80, height: 24},
 		tea.WithAltScreen(),
 	)
 	_, err = p.Run()
@@ -182,9 +202,14 @@ func (m model) loadAll() tea.Msg {
 	}
 }
 
-// Init é chamado uma vez pelo Bubbletea. Dispara a primeira carga.
+// Init é chamado uma vez pelo Bubbletea. Dispara a primeira carga, o timer
+// de fallback e, se disponível, a escuta do watcher de .git.
 func (m model) Init() tea.Cmd {
-	return m.loadAll
+	cmds := []tea.Cmd{m.loadAll, tickCmd()}
+	if cmd := m.waitForGitChange(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update trata eventos. Deve ser puro: nada de I/O, nada de Print.
@@ -247,13 +272,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = modeCommitInput
 			m.commitText = ""
 			m.notice = ""
+		case "d":
+			// Diff do arquivo selecionado no working tree (5f).
+			if cmd := m.showSelectedFile(); cmd != nil {
+				return m, cmd
+			}
+		case "pgdown":
+			if m.diffOpen {
+				m.scrollDiff(m.diffPage())
+			}
+		case "pgup":
+			if m.diffOpen {
+				m.scrollDiff(-m.diffPage())
+			}
+		case "home":
+			if m.diffOpen {
+				m.diffScroll = 0
+			}
+		case "end":
+			if m.diffOpen {
+				m.diffScroll = m.diffMaxScroll()
+			}
 		case "esc":
-			// Fechar também limpa diffHash: respostas em voo serão
+			// Fechar também limpa diffKey: respostas em voo serão
 			// descartadas quando chegarem.
 			m.diffOpen = false
 			m.diff = ""
 			m.diffErr = nil
-			m.diffHash = ""
+			m.diffKey = ""
+			m.diffLabel = ""
+			m.diffScroll = 0
 		}
 	case loadedMsg:
 		// Copia os dados para o model. A partir daqui View já pode renderizar.
@@ -272,18 +320,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case diffMsg:
 		// Descarta resposta atrasada se o painel foi fechado ou se outro
-		// commit foi selecionado enquanto este git show rodava.
-		if !m.diffOpen || m.diffHash != msg.hash {
+		// commit/arquivo foi selecionado enquanto o comando rodava.
+		if !m.diffOpen || m.diffKey != msg.key {
 			return m, nil
 		}
 		m.diff = msg.text
 		m.diffErr = msg.err
+		m.diffScroll = 0
+	case tickMsg:
+		// Fallback periódico: recarrega e rearma o próximo tick.
+		return m, tea.Batch(m.loadAll, tickCmd())
+	case refreshMsg:
+		// O watcher acordou: recarrega e volta a escutar o próximo evento.
+		cmd := m.waitForGitChange()
+		if cmd == nil {
+			return m, m.loadAll
+		}
+		return m, tea.Batch(m.loadAll, cmd)
 	case actionMsg:
 		// Qualquer ação pode mudar commits/branches: fecha o diff antigo.
 		m.diffOpen = false
 		m.diff = ""
 		m.diffErr = nil
-		m.diffHash = ""
+		m.diffKey = ""
+		m.diffLabel = ""
+		m.diffScroll = 0
 
 		if msg.err != nil {
 			m.notice = "erro: " + msg.err.Error()
@@ -421,7 +482,7 @@ func (m *model) submitCommit() tea.Cmd {
 
 // showSelectedCommit prepara o model e devolve o tea.Cmd que roda git show.
 //
-// Recebe *model para poder marcar diffOpen/diffHash no model local do Update;
+// Recebe *model para poder marcar diffOpen/diffKey no model local do Update;
 // o I/O em si acontece dentro da closure, nunca aqui.
 func (m *model) showSelectedCommit() tea.Cmd {
 	if m.focus != focusCommits || len(m.commits) == 0 {
@@ -432,12 +493,41 @@ func (m *model) showSelectedCommit() tea.Cmd {
 	m.diffOpen = true
 	m.diff = "carregando..."
 	m.diffErr = nil
-	m.diffHash = hash
+	m.diffKey = hash
+	m.diffLabel = shortHash(hash)
+	m.diffScroll = 0
 
 	repo := m.repo
 	return func() tea.Msg {
 		text, err := repo.Show(context.Background(), hash)
-		return diffMsg{hash: hash, text: text, err: err}
+		return diffMsg{key: hash, text: text, err: err}
+	}
+}
+
+// showSelectedFile abre o diff do arquivo selecionado no painel de status
+// (5f). Compartilha o mesmo painel e o mesmo guard de resposta do commit.
+func (m *model) showSelectedFile() tea.Cmd {
+	if m.focus != focusStatus {
+		return nil
+	}
+
+	files := m.visibleStatus()
+	if len(files) == 0 {
+		return nil
+	}
+	path := files[m.cursor[focusStatus]].Path
+
+	m.diffOpen = true
+	m.diff = "carregando..."
+	m.diffErr = nil
+	m.diffKey = path
+	m.diffLabel = path
+	m.diffScroll = 0
+
+	repo := m.repo
+	return func() tea.Msg {
+		text, err := repo.DiffFile(context.Background(), path)
+		return diffMsg{key: path, text: text, err: err}
 	}
 }
 
@@ -483,9 +573,9 @@ func (m model) footerText() string {
 		}
 		text += " (y/n)"
 	default:
-		text = "q sair │ tab painel │ j/k mover │ enter abrir │ s/u stage │ c commit"
+		text = "q sair │ tab painel │ j/k mover │ enter abrir │ d diff │ s/u stage │ c commit"
 		if m.diffOpen {
-			text = "esc fechar │ q sair │ tab painel │ j/k mover"
+			text = "esc fechar │ pgup/pgdn scroll │ home/end topo/fim │ q sair"
 		}
 	}
 
@@ -536,38 +626,35 @@ func (m model) diffHeight() int {
 	return h
 }
 
-// renderDiffPanel desenha o diff do commit selecionado usando a largura toda.
-//
-// Mostramos apenas as primeiras linhas que cabem na altura calculada. O diff
-// é somente leitura nesta etapa; scroll vem junto com o Bloco 5 completo.
+// renderDiffPanel desenha o diff do commit ou arquivo selecionado usando a
+// largura toda e respeitando o offset de scroll.
 func (m model) renderDiffPanel() string {
 	width := m.width - 2 // desconta as duas bordas verticais
 	if width < 8 {
 		width = 8
 	}
 	height := m.diffHeight()
+	visible := m.diffVisibleLines()
+
+	lines := m.diffLines()
+	start := clampScroll(m.diffScroll, len(lines), visible)
+	end := start + visible
+	if end > len(lines) {
+		end = len(lines)
+	}
 
 	title := "== Diff =="
-	if m.diffHash != "" {
-		title = "== Diff " + shortHash(m.diffHash) + " =="
+	if m.diffLabel != "" {
+		title = "== Diff " + m.diffLabel
+		if len(lines) > visible {
+			title += fmt.Sprintf(" (%d-%d/%d)", start+1, end, len(lines))
+		}
+		title += " =="
 	}
-
-	var lines []string
-	switch {
-	case m.diffErr != nil:
-		lines = []string{"erro: " + m.diffErr.Error()}
-	case m.diff == "":
-		lines = []string{"(diff vazio)"}
-	default:
-		lines = strings.Split(m.diff, "\n")
-	}
+	title = truncate(title, width-2)
 
 	body := titleStyle.Render(title)
-	maxLines := height - 1 // o título ocupa a primeira linha
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-	}
-	for _, line := range lines {
+	for _, line := range lines[start:end] {
 		// width-2 é a área útil depois do padding horizontal de 1 de cada lado.
 		body += "\n" + truncate(line, width-2)
 	}
@@ -576,6 +663,66 @@ func (m model) renderDiffPanel() string {
 		Width(width).
 		Height(height).
 		Render(body)
+}
+
+// diffLines transforma o texto cru em linhas exibíveis. Centralizado para
+// render e cálculo de scroll usarem exatamente a mesma contagem.
+func (m model) diffLines() []string {
+	switch {
+	case m.diffErr != nil:
+		return []string{"erro: " + m.diffErr.Error()}
+	case m.diff == "":
+		return []string{"(diff vazio)"}
+	default:
+		return strings.Split(m.diff, "\n")
+	}
+}
+
+// diffVisibleLines é quantas linhas de diff cabem (o título ocupa uma).
+func (m model) diffVisibleLines() int {
+	n := m.diffHeight() - 1
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// diffPage é o passo de pgup/pgdn: meia tela, no mínimo 1.
+func (m model) diffPage() int {
+	n := m.diffVisibleLines() / 2
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// diffMaxScroll é o maior offset válido para o conteúdo atual.
+func (m model) diffMaxScroll() int {
+	max := len(m.diffLines()) - m.diffVisibleLines()
+	if max < 0 {
+		return 0
+	}
+	return max
+}
+
+// scrollDiff move o diff e prende o offset nos limites.
+func (m *model) scrollDiff(delta int) {
+	m.diffScroll = clampScroll(m.diffScroll+delta, len(m.diffLines()), m.diffVisibleLines())
+}
+
+// clampScroll prende offset em [0, total-visible]. (total <= visible => 0.)
+func clampScroll(offset, total, visible int) int {
+	max := total - visible
+	if max < 0 {
+		max = 0
+	}
+	if offset < 0 {
+		return 0
+	}
+	if offset > max {
+		return max
+	}
+	return offset
 }
 
 // renderPanel devolve uma caixa pronta (borda + título + linhas).
