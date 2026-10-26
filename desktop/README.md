@@ -11,6 +11,10 @@ npm install
 npm run tauri -- dev
 ```
 
+> No Windows, confirme que `%USERPROFILE%\.cargo\bin` está no `PATH` (é onde o
+> rustup instala `cargo` e `rustc`). O Tauri também precisa do workload
+> **Desktop development with C++** do Visual Studio Build Tools.
+
 O Tauri executa `npm run sidecar` antes de iniciar: o binário Go é compilado em
 `src-tauri/binaries/gg-cli-<target-triple>.exe` e embarcado como sidecar.
 
