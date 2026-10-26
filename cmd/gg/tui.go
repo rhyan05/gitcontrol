@@ -21,6 +21,16 @@ const (
 	numPanels            // quantidade total; também define o tamanho de cursor
 )
 
+// uiMode separa a tela normal dos fluxos que capturam teclas:
+// confirmação de checkout e digitação da mensagem de commit.
+type uiMode int
+
+const (
+	modeNormal uiMode = iota
+	modeConfirmCheckout
+	modeCommitInput
+)
+
 // Estilos estáticos da TUI.
 //
 // lipgloss usa cores ANSI de 256 cores; "39" é azul e "240" é um cinza
@@ -51,6 +61,12 @@ var (
 	hashStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	headStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	untrackedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+
+	// remoteStyle distingue branches remotas das locais (5c).
+	remoteStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+
+	// upstreamStyle deixa o "→ origin/main" discreto ao lado da branch local.
+	upstreamStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	// selectedStyle destaca a linha inteira no painel focado (item 4d).
 	// ColorWhitespace(true) é o que faz o fundo cobrir também o padding
@@ -95,6 +111,22 @@ type model struct {
 	diff     string
 	diffErr  error
 	diffHash string
+
+	// Estado dos fluxos interativos (5c-5e).
+	// mode evita que "q", "j" etc. sejam tratados como teclas globais
+	// enquanto o usuário confirma um checkout ou digita uma mensagem.
+	mode          uiMode
+	pendingBranch string
+	pendingRemote bool
+	commitText    string
+	notice        string
+}
+
+// actionMsg é a resposta assíncrona de checkout/stage/unstage/commit.
+// notice é a mensagem de sucesso; err, quando presente, vence na exibição.
+type actionMsg struct {
+	notice string
+	err    error
 }
 
 // loadedMsg é a resposta de loadAll: um "pacote" com tudo que a tela precisa.
@@ -158,18 +190,31 @@ func (m model) Init() tea.Cmd {
 // Update trata eventos. Deve ser puro: nada de I/O, nada de Print.
 // Eventos tratados hoje:
 //   - WindowSizeMsg: o terminal mudou de tamanho (recalcula larguras/alturas);
-//   - KeyMsg: q sai, tab/shift+tab trocam o foco, j/k movem o cursor,
-//     enter abre o diff do commit e esc fecha;
+//   - KeyMsg: navegação normal, confirmação de checkout e input de commit;
 //   - loadedMsg: chegada dos dados do loadAll;
-//   - diffMsg: chegada do diff pedido ao git show.
+//   - diffMsg: chegada do diff pedido ao git show;
+//   - actionMsg: resultado de checkout/stage/unstage/commit.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		// View usa m.width/m.height para recalcular tudo no próximo frame.
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
+		// ctrl+c sai de qualquer modo, inclusive digitando mensagem.
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+
+		// Modos que capturam o teclado têm prioridade sobre a navegação.
+		switch m.mode {
+		case modeCommitInput:
+			return m.updateCommitInput(msg)
+		case modeConfirmCheckout:
+			return m.updateCheckoutConfirm(msg)
+		}
+
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "q":
 			return m, tea.Quit
 		case "tab":
 			m.focus = (m.focus + 1) % numPanels
@@ -182,11 +227,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "k":
 			m.cursor[m.focus] = moveCursor(m.cursor[m.focus], -1, m.count(m.focus))
 		case "enter":
-			// O diff só faz sentido no painel de commits. Nos outros,
-			// enter será usado por checkout/stage nos próximos blocos.
-			if cmd := m.showSelectedCommit(); cmd != nil {
+			switch m.focus {
+			case focusCommits:
+				if cmd := m.showSelectedCommit(); cmd != nil {
+					return m, cmd
+				}
+			case focusBranches:
+				m.startCheckout()
+			}
+		case "s":
+			if cmd := m.stageSelected(); cmd != nil {
 				return m, cmd
 			}
+		case "u":
+			if cmd := m.unstageSelected(); cmd != nil {
+				return m, cmd
+			}
+		case "c":
+			m.mode = modeCommitInput
+			m.commitText = ""
+			m.notice = ""
 		case "esc":
 			// Fechar também limpa diffHash: respostas em voo serão
 			// descartadas quando chegarem.
@@ -204,6 +264,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commitsErr = msg.commitsErr
 		m.statusErr = msg.statusErr
 		m.loaded = true
+
+		// Depois de checkout/stage/commit as listas podem encolher.
+		// Sem o clamp, o cursor ficaria apontando para fora do slice.
+		for i := 0; i < numPanels; i++ {
+			m.cursor[i] = clampCursor(m.cursor[i], m.count(i))
+		}
 	case diffMsg:
 		// Descarta resposta atrasada se o painel foi fechado ou se outro
 		// commit foi selecionado enquanto este git show rodava.
@@ -212,8 +278,145 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.diff = msg.text
 		m.diffErr = msg.err
+	case actionMsg:
+		// Qualquer ação pode mudar commits/branches: fecha o diff antigo.
+		m.diffOpen = false
+		m.diff = ""
+		m.diffErr = nil
+		m.diffHash = ""
+
+		if msg.err != nil {
+			m.notice = "erro: " + msg.err.Error()
+		} else {
+			m.notice = msg.notice
+		}
+
+		// Recarrega tudo para refletir a ação (ex.: novo commit no topo).
+		return m, m.loadAll
 	}
 	return m, nil
+}
+
+// updateCommitInput trata teclas enquanto a mensagem de commit é digitada.
+// Sem cursor móvel: o texto sempre cresce/encolhe no fim.
+func (m model) updateCommitInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		return m, m.submitCommit()
+	case tea.KeyEsc:
+		m.mode = modeNormal
+		m.commitText = ""
+	case tea.KeyBackspace:
+		m.commitText = removeLastRune(m.commitText)
+	case tea.KeyRunes:
+		// Runes cobre letras, acentos, espaços e texto colado de uma vez.
+		m.commitText += string(msg.Runes)
+	}
+	return m, nil
+}
+
+// updateCheckoutConfirm trata y/n/esc enquanto a confirmação está aberta.
+func (m model) updateCheckoutConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		return m, m.doCheckout()
+	case "n", "esc":
+		m.mode = modeNormal
+		m.pendingBranch = ""
+		m.pendingRemote = false
+		m.notice = ""
+	}
+	return m, nil
+}
+
+// startCheckout arma a confirmação de checkout para a branch selecionada.
+// Só marca o estado; o git só roda depois do "y".
+func (m *model) startCheckout() {
+	if m.focus != focusBranches || len(m.branches) == 0 {
+		return
+	}
+
+	b := m.branches[m.cursor[focusBranches]]
+	m.pendingBranch = b.Name
+	m.pendingRemote = b.IsRemote
+	m.mode = modeConfirmCheckout
+	m.notice = ""
+}
+
+// doCheckout devolve o tea.Cmd que executa o checkout confirmado.
+// Para branch remota, o core cria a local de tracking automaticamente.
+func (m *model) doCheckout() tea.Cmd {
+	branch := m.pendingBranch
+	m.mode = modeNormal
+	m.pendingBranch = ""
+	m.pendingRemote = false
+
+	repo := m.repo
+	return func() tea.Msg {
+		if err := repo.Checkout(context.Background(), branch); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{notice: "checkout: " + branch}
+	}
+}
+
+// stageSelected e unstageSelected agem no arquivo selecionado do status.
+func (m *model) stageSelected() tea.Cmd {
+	return m.fileAction(true)
+}
+
+func (m *model) unstageSelected() tea.Cmd {
+	return m.fileAction(false)
+}
+
+// fileAction evita duplicar o cmd de stage/unstage; só o verbo muda.
+func (m *model) fileAction(stage bool) tea.Cmd {
+	if m.focus != focusStatus {
+		return nil
+	}
+
+	files := m.visibleStatus()
+	if len(files) == 0 {
+		return nil
+	}
+	path := files[m.cursor[focusStatus]].Path
+	repo := m.repo
+
+	return func() tea.Msg {
+		verb := "unstage"
+		var err error
+		if stage {
+			verb = "stage"
+			err = repo.Stage(context.Background(), []string{path})
+		} else {
+			err = repo.Unstage(context.Background(), []string{path})
+		}
+		if err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{notice: verb + ": " + path}
+	}
+}
+
+// submitCommit valida a mensagem e devolve o cmd que cria o commit.
+// Mensagem vazia mantém o input aberto e avisa no rodapé.
+func (m *model) submitCommit() tea.Cmd {
+	message := strings.TrimSpace(m.commitText)
+	if message == "" {
+		m.notice = "mensagem de commit vazia"
+		return nil
+	}
+
+	m.mode = modeNormal
+	m.commitText = ""
+	repo := m.repo
+
+	return func() tea.Msg {
+		if err := repo.Commit(context.Background(), message); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{notice: "commit: " + message}
+	}
 }
 
 // showSelectedCommit prepara o model e devolve o tea.Cmd que roda git show.
@@ -255,16 +458,41 @@ func (m model) View() string {
 	)
 
 	views := []string{panels}
-	help := "q sair │ tab painel │ j/k mover │ enter diff"
 	if m.diffOpen {
 		views = append(views, m.renderDiffPanel())
-		help = "esc fechar │ q sair │ tab painel │ j/k mover"
 	}
 
 	// O rodapé também é truncado para nunca quebrar linha em terminal estreito.
-	views = append(views, footerStyle.Render(truncate(help, m.width)))
+	views = append(views, footerStyle.Render(truncate(m.footerText(), m.width)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, views...)
+}
+
+// footerText escolhe a linha de ajuda de acordo com o modo atual.
+// Em input/confirmacão o texto muda; notice (sucesso/erro) é prefixado.
+func (m model) footerText() string {
+	var text string
+
+	switch m.mode {
+	case modeCommitInput:
+		text = fmt.Sprintf("commit> %s │ enter commitar │ esc cancelar", m.commitText)
+	case modeConfirmCheckout:
+		text = "checkout " + m.pendingBranch + "?"
+		if m.pendingRemote {
+			text += " cria branch local"
+		}
+		text += " (y/n)"
+	default:
+		text = "q sair │ tab painel │ j/k mover │ enter abrir │ s/u stage │ c commit"
+		if m.diffOpen {
+			text = "esc fechar │ q sair │ tab painel │ j/k mover"
+		}
+	}
+
+	if m.notice != "" {
+		text = m.notice + " │ " + text
+	}
+	return text
 }
 
 // panelWidth calcula a largura interna de cada painel.
@@ -395,8 +623,14 @@ func (m model) count(panel int) int {
 
 // branchLines monta as linhas do painel de branches.
 //
-// A branch atual ganha "*" e cor verde. A linha selecionada é montada sem
-// cores internas e recebe o highlight por fora (ver selectedLine).
+// Marcadores:
+//   - "*" e verde: branch atual (HEAD);
+//   - "→ origin/x" em cinza: upstream de uma branch local;
+//   - "[remota]" em ciano: branch que vive só no remoto. Enter nela cria a
+//     branch local de tracking (o core cuida disso no Checkout).
+//
+// A linha selecionada é montada sem cores internas e recebe o highlight por
+// fora (ver selectedLine).
 func (m model) branchLines() []string {
 	if m.branchesErr != nil {
 		return []string{"erro: " + m.branchesErr.Error()}
@@ -407,21 +641,40 @@ func (m model) branchLines() []string {
 
 	lines := make([]string, 0, len(m.branches))
 	for i, b := range m.branches {
-		// Texto puro, sem ANSI: é o que vai para o highlight.
-		plain := "  " + b.Name
+		name := "  " + b.Name
 		if b.IsHead {
-			plain = "* " + b.Name
+			name = "* " + b.Name
 		}
 
+		// Remota explícita ou upstream da local (nunca os dois).
+		suffix := ""
+		if b.IsRemote {
+			suffix = " [remota]"
+		} else if b.Upstream != "" {
+			suffix = " → " + b.Upstream
+		}
+
+		// Texto puro, sem ANSI: é o que vai para o highlight.
+		plain := name + suffix
 		if m.isSelected(focusBranches, i) {
 			lines = append(lines, m.selectedLine(plain))
 			continue
 		}
 
-		// Fora do highlight, o "* nome" da HEAD fica verde.
-		text := plain
-		if b.IsHead {
-			text = headStyle.Render(plain)
+		// Fora do highlight, cada trecho ganha sua cor.
+		text := name
+		switch {
+		case b.IsHead:
+			text = headStyle.Render(name)
+		case b.IsRemote:
+			text = remoteStyle.Render(name)
+		}
+		if suffix != "" {
+			if b.IsRemote {
+				text += remoteStyle.Render(suffix)
+			} else {
+				text += upstreamStyle.Render(suffix)
+			}
 		}
 		lines = append(lines, "  "+text)
 	}
@@ -555,6 +808,32 @@ func moveCursor(cursor, delta, count int) int {
 		return count - 1
 	}
 	return cursor
+}
+
+// clampCursor garante que um cursor existente continue válido depois de um
+// reload (a lista pode ter encolhido). Sem isso, o próximo Enter usaria um
+// índice fora do slice e a TUI quebraria.
+func clampCursor(cursor, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	if cursor < 0 {
+		return 0
+	}
+	if cursor >= count {
+		return count - 1
+	}
+	return cursor
+}
+
+// removeLastRune remove a última runa (não o último byte), para backspace
+// funcionar corretamente com acentos e emojis.
+func removeLastRune(s string) string {
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return ""
+	}
+	return string(runes[:len(runes)-1])
 }
 
 // truncate corta o texto na largura visual informada.

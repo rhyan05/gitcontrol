@@ -171,3 +171,177 @@ func TestViewFitsTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckoutConfirmFlow(t *testing.T) {
+	m := model{
+		repo:     git.New("."),
+		focus:    focusBranches,
+		branches: []git.Branch{{Name: "feature"}},
+		loaded:   true,
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.mode != modeConfirmCheckout {
+		t.Fatalf("modo = %v, esperava modeConfirmCheckout", got.mode)
+	}
+	if got.pendingBranch != "feature" {
+		t.Errorf("pendingBranch = %q, esperava feature", got.pendingBranch)
+	}
+
+	next, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	got = next.(model)
+	if got.mode != modeNormal {
+		t.Errorf("depois de y: modo = %v, esperava modeNormal", got.mode)
+	}
+	if cmd == nil {
+		t.Error("y deveria disparar o checkout")
+	}
+}
+
+func TestCheckoutCancel(t *testing.T) {
+	m := model{
+		repo:          git.New("."),
+		focus:         focusBranches,
+		branches:      []git.Branch{{Name: "feature"}},
+		loaded:        true,
+		mode:          modeConfirmCheckout,
+		pendingBranch: "feature",
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	got := next.(model)
+	if got.mode != modeNormal || got.pendingBranch != "" {
+		t.Errorf("n deveria cancelar: mode=%v branch=%q", got.mode, got.pendingBranch)
+	}
+	if cmd != nil {
+		t.Error("n não deveria disparar comando")
+	}
+}
+
+func TestRemoteBranchLabels(t *testing.T) {
+	m := model{
+		focus: focusCommits, // evita o highlight de seleção nas branches
+		branches: []git.Branch{
+			{Name: "main", IsHead: true, Upstream: "origin/main"},
+			{Name: "origin/feature", IsRemote: true},
+		},
+	}
+
+	lines := strings.Join(m.branchLines(), "\n")
+	for _, want := range []string{"→ origin/main", "[remota]"} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("branchLines não contém %q:\n%s", want, lines)
+		}
+	}
+}
+
+func TestRemoteCheckoutFooterMentionsLocalBranch(t *testing.T) {
+	m := model{
+		focus:    focusBranches,
+		branches: []git.Branch{{Name: "origin/feature", IsRemote: true}},
+		loaded:   true,
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if !got.pendingRemote {
+		t.Error("pendingRemote deveria ser true")
+	}
+	if !strings.Contains(got.footerText(), "cria branch local") {
+		t.Errorf("footer = %q, esperava mencionar a branch local", got.footerText())
+	}
+}
+
+func TestCommitInputFlow(t *testing.T) {
+	m := model{repo: git.New("."), loaded: true}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	got := next.(model)
+	if got.mode != modeCommitInput {
+		t.Fatalf("c deveria abrir o input: modo = %v", got.mode)
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("oi")})
+	got = next.(model)
+	if got.commitText != "oi" {
+		t.Fatalf("commitText = %q, esperava oi", got.commitText)
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	got = next.(model)
+	if got.commitText != "o" {
+		t.Errorf("backspace: commitText = %q, esperava o", got.commitText)
+	}
+
+	next, cmd := got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = next.(model)
+	if got.mode != modeNormal || cmd == nil || got.commitText != "" {
+		t.Errorf("enter deveria enviar: mode=%v cmd=%v text=%q", got.mode, cmd, got.commitText)
+	}
+}
+
+func TestCommitEmptyMessageKeepsInputOpen(t *testing.T) {
+	m := model{repo: git.New("."), loaded: true, mode: modeCommitInput}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+
+	if cmd != nil {
+		t.Error("mensagem vazia não deveria disparar comando")
+	}
+	if got.mode != modeCommitInput {
+		t.Error("input deveria continuar aberto")
+	}
+	if got.notice != "mensagem de commit vazia" {
+		t.Errorf("notice = %q", got.notice)
+	}
+}
+
+func TestStageAndUnstageKeys(t *testing.T) {
+	for _, key := range []string{"s", "u"} {
+		m := model{
+			repo:   git.New("."),
+			focus:  focusStatus,
+			loaded: true,
+			status: &git.StatusResult{Files: []git.FileStatus{{Path: "a.txt"}}},
+		}
+
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		if cmd == nil {
+			t.Errorf("%s no status deveria disparar comando", key)
+		}
+		if mode := next.(model).mode; mode != modeNormal {
+			t.Errorf("%s não deveria mudar de modo", key)
+		}
+	}
+}
+
+func TestEscInInputDoesNotCloseDiff(t *testing.T) {
+	m := model{
+		loaded:     true,
+		mode:       modeCommitInput,
+		commitText: "msg",
+		diffOpen:   true,
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := next.(model)
+
+	if got.mode != modeNormal || got.commitText != "" {
+		t.Errorf("esc deveria cancelar o input: mode=%v text=%q", got.mode, got.commitText)
+	}
+	if !got.diffOpen {
+		t.Error("esc no input não deveria fechar o diff")
+	}
+}
+
+func TestCursorClampedAfterReload(t *testing.T) {
+	m := model{loaded: true}
+	m.cursor[focusCommits] = 5
+
+	next, _ := m.Update(loadedMsg{commits: []git.Commit{{Hash: "a"}}})
+	if got := next.(model).cursor[focusCommits]; got != 0 {
+		t.Errorf("cursor = %d, esperava 0 depois do reload", got)
+	}
+}
