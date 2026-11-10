@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1
+
+- CI do Rust compila o sidecar antes do `cargo check`.
+- CI ganhou smoke test do wheel PyPI (build, instalação em venv, `--version` e
+  `--json status`).
+- Testes adicionais para grafo, troca de repositório e ações novas da TUI.
+- Screenshot e metadados do repositório atualizados.
+- Release workflow validado ponta a ponta e publicando no PyPI via secret.
+
 ## 0.1.0
 
 - Core Go com status, log, grafo, branches, show, diff, checkout, merge,

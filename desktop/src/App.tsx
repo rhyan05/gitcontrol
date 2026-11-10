@@ -646,8 +646,8 @@ function App() {
       )}
 
       <div className="flex min-h-0 flex-1 flex-col px-2 pt-2">
-        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-surface">
-          <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-line overflow-auto lg:grid-cols-[240px_minmax(0,1fr)_320px] lg:divide-x lg:divide-y-0 lg:overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-line bg-surface">
+          <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 divide-y divide-line overflow-auto lg:grid-cols-[240px_minmax(0,1fr)_320px] lg:divide-x lg:divide-y-0 lg:overflow-hidden">
             <BranchPanel
               branches={filteredBranches}
               selected={selectedBranch}

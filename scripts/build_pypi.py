@@ -2,12 +2,21 @@
 """Compila os binários Go para o wheel universal do PyPI."""
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN_DIR = ROOT / "packaging" / "pypi" / "gitcontrol" / "bin"
+
+
+def project_version() -> str:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'^version = "([^"]+)"', text, re.M)
+    if not match:
+        raise SystemExit("versão não encontrada em pyproject.toml")
+    return match.group(1)
 
 TARGETS = [
     ("windows", "amd64"),
@@ -19,7 +28,7 @@ TARGETS = [
 
 
 def main() -> None:
-    version = os.environ.get("VERSION", "0.1.0")
+    version = os.environ.get("VERSION") or project_version()
     shutil.rmtree(BIN_DIR, ignore_errors=True)
     BIN_DIR.mkdir(parents=True, exist_ok=True)
 

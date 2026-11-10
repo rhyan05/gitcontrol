@@ -1,5 +1,9 @@
 # gitcontrol
 
+[![ci](https://github.com/rhyan05/gitcontrol/actions/workflows/ci.yml/badge.svg)](https://github.com/rhyan05/gitcontrol/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/gitcontrol)](https://pypi.org/project/gitcontrol/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Gerenciador de Git com três interfaces sobre o mesmo core:
 
 - **TUI** em Go/Bubble Tea para operar tudo pelo terminal.
@@ -123,8 +127,8 @@ npm run tauri -- build
 
 Artefatos:
 
-- `desktop/src-tauri/target/release/bundle/msi/gitcontrol_0.1.0_x64_en-US.msi`
-- `desktop/src-tauri/target/release/bundle/nsis/gitcontrol_0.1.0_x64-setup.exe`
+- `desktop/src-tauri/target/release/bundle/msi/gitcontrol_0.1.1_x64_en-US.msi`
+- `desktop/src-tauri/target/release/bundle/nsis/gitcontrol_0.1.1_x64-setup.exe`
 
 Atalhos da GUI: `/` busca, `r` atualiza, `Ctrl/Cmd+K` abre a paleta de comandos,
 `Esc` fecha diálogos. O painel de diff é redimensionável pela alça acima dele.

@@ -146,6 +146,53 @@ describe("App", () => {
     });
   });
 
+  it("abre o diff do arquivo ao clicar no status", async () => {
+    const user = userEvent.setup();
+    mockRepo(statusWith());
+    renderApp();
+
+    await user.click(
+      await screen.findByRole("button", { name: "src/App.tsx" }),
+    );
+
+    await waitFor(() => {
+      expect(runMock).toHaveBeenCalledWith(
+        expect.any(String),
+        "diff",
+        "src/App.tsx",
+      );
+    });
+    expect(await screen.findByText("+linha nova")).toBeInTheDocument();
+  });
+
+  it("continua merge em conflito", async () => {
+    const user = userEvent.setup();
+    mockRepo(
+      statusWith({
+        operation: "merge",
+        files: [
+          { path: "a.txt", index_xy: "U", worktree_xy: "U", unmerged: true },
+        ],
+      }),
+    );
+    renderApp();
+
+    expect(await screen.findByText("merge em andamento")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole("button", { name: "Continuar" }),
+      ).toHaveLength(2);
+    });
+    const buttons = screen.getAllByRole("button", { name: "Continuar" });
+    await user.click(buttons[buttons.length - 1]);
+
+    await waitFor(() => {
+      expect(runMock).toHaveBeenCalledWith(expect.any(String), "continue");
+    });
+  });
+
   it("filtra os painéis pela busca", async () => {
     const user = userEvent.setup();
     mockRepo(statusWith());

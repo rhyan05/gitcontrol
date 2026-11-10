@@ -8,7 +8,7 @@ import (
 	"github.com/rhyan05/gitcontrol/internal/git"
 )
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 const usage = `uso:
   gitcontrol [--repo <path>] [repo...]        abre a TUI

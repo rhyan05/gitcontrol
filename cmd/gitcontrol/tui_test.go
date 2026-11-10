@@ -537,3 +537,52 @@ func TestDiffScrollKeys(t *testing.T) {
 		t.Errorf("home: scroll = %d, esperava 0", got)
 	}
 }
+
+func TestCommitLinesShowGraph(t *testing.T) {
+	m := model{
+		commits: []git.Commit{{Hash: "abcdef1234567890", Subject: "primeiro"}},
+		graph:   map[string]string{"abcdef1234567890": "| *"},
+	}
+	lines := m.commitLines()
+	if len(lines) != 1 || !strings.Contains(lines[0], "| *") {
+		t.Fatalf("commitLines = %+v, esperava prefixo de grafo", lines)
+	}
+}
+
+func TestFooterShowsRemoteAndConflictKeys(t *testing.T) {
+	m := model{loaded: true, width: 160, height: 40}
+	footer := m.footerText()
+	for _, want := range []string{"f fetch", "p pull", "P push", "a/x conflito"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("footer não contém %q: %s", want, footer)
+		}
+	}
+}
+
+func TestAbortWithoutOperationSetsNotice(t *testing.T) {
+	m := model{status: &git.StatusResult{}}
+	m.startAbort()
+	if m.mode != modeNormal {
+		t.Errorf("mode = %v, esperava normal", m.mode)
+	}
+	if !strings.Contains(m.notice, "nenhuma operação") {
+		t.Errorf("notice = %q", m.notice)
+	}
+}
+
+func TestSwitchRepoChangesActiveIndex(t *testing.T) {
+	m := model{
+		repoPaths: []string{t.TempDir(), t.TempDir()},
+		repoIndex: 0,
+		loaded:    true,
+	}
+	m.repo = git.New(m.repoPaths[0])
+
+	m.switchRepo(1)
+	if m.repoIndex != 1 {
+		t.Errorf("repoIndex = %d, esperava 1", m.repoIndex)
+	}
+	if m.loaded {
+		t.Error("switchRepo deveria marcar loaded=false")
+	}
+}
