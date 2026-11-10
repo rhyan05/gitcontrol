@@ -15,6 +15,27 @@ Interface Tauri + React do [gitcontrol](../README.md).
 - Conflitos: abrir no editor, marcar como resolvido, continuar ou abortar.
 - Vários repositórios abertos, com troca pela barra de repos e lista persistida.
 
+## Distribuição
+
+O release gera:
+
+- Windows: MSI e NSIS.
+- Linux (x86_64): AppImage e `.deb`.
+- macOS (Apple Silicon): `.dmg`.
+
+Linux AppImage: `chmod +x` e executar; se faltar FUSE, instale `libfuse2` ou use
+`--appimage-extract-and-run`. `.deb`: `sudo apt install ./gitcontrol_*.deb`.
+
+macOS: o `.dmg` não é assinado/notarizado. Na primeira execução use botão
+direito → Abrir ou:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/gitcontrol.app
+```
+
+Windows: builds sem assinatura podem acionar o SmartScreen; use **Mais
+informações → Executar assim mesmo**.
+
 ## Desenvolvimento
 
 ```powershell

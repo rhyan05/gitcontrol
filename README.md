@@ -47,7 +47,43 @@ go install github.com/rhyan05/gitcontrol/cmd/gitcontrol@latest
 
 ### Desktop
 
-Baixe o `.msi` ou o instalador NSIS na página de releases do GitHub.
+Baixe o artefato da sua plataforma na página de releases:
+
+- **Windows**: `.msi` ou instalador NSIS.
+- **Linux**: `.AppImage` ou `.deb` (x86_64).
+- **macOS**: `.dmg` (Apple Silicon).
+
+Linux (AppImage):
+
+```bash
+chmod +x gitcontrol_*.AppImage
+./gitcontrol_*.AppImage
+```
+
+Se o AppImage reclamar de FUSE:
+
+```bash
+sudo apt install libfuse2
+# ou rode sem FUSE:
+./gitcontrol_*.AppImage --appimage-extract-and-run
+```
+
+Linux (Debian/Ubuntu):
+
+```bash
+sudo apt install ./gitcontrol_*.deb
+```
+
+macOS: abra o `.dmg`, arraste o app para Applications e use botão direito →
+**Abrir** na primeira execução. Se o Gatekeeper bloquear:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/gitcontrol.app
+open /Applications/gitcontrol.app
+```
+
+Windows: se o SmartScreen avisar, clique em **Mais informações → Executar assim
+mesmo**. Os builds não são assinados/notarizados; esse aviso é esperado.
 
 ## Arquitetura
 
@@ -152,8 +188,10 @@ npm run tauri -- build
 
 Artefatos:
 
-- `desktop/src-tauri/target/release/bundle/msi/gitcontrol_0.1.3_x64_en-US.msi`
-- `desktop/src-tauri/target/release/bundle/nsis/gitcontrol_0.1.3_x64-setup.exe`
+- Windows: `desktop/src-tauri/target/release/bundle/msi/*.msi` e
+  `.../bundle/nsis/*.exe`
+- Linux: `.../bundle/appimage/*.AppImage` e `.../bundle/deb/*.deb`
+- macOS: `.../bundle/dmg/*.dmg`
 
 Atalhos da GUI: `/` busca, `r` atualiza, `Ctrl/Cmd+K` abre a paleta de comandos,
 `Esc` fecha diálogos. O painel de diff é redimensionável pela alça acima dele.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4
+
+- Desktop Linux: AppImage e `.deb` (x86_64) no release.
+- Desktop macOS: `.dmg` unsigned para Apple Silicon, com instruções de bypass do
+  Gatekeeper.
+- Documentação de instalação para Linux/macOS e avisos de builds não assinados.
+- Release workflow passa a publicar os três desktops (Windows, Linux e macOS).
+
 ## 0.1.3
 
 - Branches: criar, deletar e renomear na TUI, desktop e CLI.
