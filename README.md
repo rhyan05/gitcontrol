@@ -10,7 +10,24 @@ Gerenciador de Git com três interfaces sobre o mesmo core:
 - **CLI JSON** (`gitcontrol --json`) com contrato estável para automação.
 - **Desktop** em Tauri + React para uma experiência visual.
 
-![Interface do gitcontrol](desktop/docs/gitcontrol.png)
+## Capturas
+
+### Desktop
+
+![Visão geral do desktop](docs/screenshots/desktop-main.png)
+
+![Diff de commit no desktop](docs/screenshots/desktop-diff.png)
+
+![Paleta de comandos](docs/screenshots/desktop-palette.png)
+
+> Capturas do desktop geradas com um repositório de demonstração.
+
+### CLI JSON
+
+```console
+$ gitcontrol --json status
+{"ok":true,"data":{"branch":"main","head_oid":"2b1a0ce...","files":[]}}
+```
 
 ## O que funciona
 
@@ -27,7 +44,7 @@ Gerenciador de Git com três interfaces sobre o mesmo core:
 - Reset: soft, mixed e hard.
 - Multi-repo: vários repositórios abertos com troca de ativo.
 - Refresh automático na TUI (fsnotify + timer) e na GUI (polling curto).
-- Instaladores Windows: `.msi` e `.exe` (NSIS).
+- Desktops: Windows (`.msi`/NSIS), Linux (`.AppImage`/`.deb`) e macOS (`.dmg`).
 
 ## Instalação
 
