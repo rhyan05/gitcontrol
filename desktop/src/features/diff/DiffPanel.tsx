@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Check, Copy, GitCommitHorizontal, WrapText } from "lucide-react";
+import { Check, Copy, FileCode2, GitCommitHorizontal, WrapText } from "lucide-react";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { IconButton } from "../../components/ui/IconButton";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { cn } from "../../lib/cn";
-import type { Commit } from "../../lib/gg";
+import type { Commit, FileStatus } from "../../lib/gitcontrol";
 import { shortHash } from "../../lib/format";
 
 function lineStyle(line: string): { text: string; background: string } {
@@ -32,6 +32,7 @@ function lineStyle(line: string): { text: string; background: string } {
 
 export function DiffPanel({
   selected,
+  selectedFile,
   diff,
   loading,
   error,
@@ -39,6 +40,7 @@ export function DiffPanel({
   copied,
 }: {
   selected: Commit | null;
+  selectedFile: FileStatus | null;
   diff: string;
   loading: boolean;
   error: string;
@@ -64,6 +66,16 @@ export function DiffPanel({
             </span>
           </>
         )}
+        {selectedFile && (
+          <>
+            <span className="font-mono text-[11px] text-accent">
+              working tree
+            </span>
+            <span className="min-w-0 truncate text-[12px] text-muted">
+              {selectedFile.path}
+            </span>
+          </>
+        )}
         <div className="ml-auto flex items-center gap-1">
           {diff && (
             <span className="mr-1 font-mono text-[10px] text-muted/70">
@@ -86,11 +98,17 @@ export function DiffPanel({
         </div>
       </header>
 
-      {!selected ? (
+      {!selected && !selectedFile ? (
         <EmptyState
-          icon={<GitCommitHorizontal size={24} />}
-          title="Selecione um commit"
-          description="O diff completo do commit aparece aqui, com linhas adicionadas e removidas destacadas."
+          icon={
+            selectedFile ? (
+              <FileCode2 size={24} />
+            ) : (
+              <GitCommitHorizontal size={24} />
+            )
+          }
+          title="Selecione um commit ou arquivo"
+          description="O diff do commit ou do arquivo do working tree aparece aqui, com linhas adicionadas e removidas destacadas."
         />
       ) : loading ? (
         <Skeleton rows={10} />

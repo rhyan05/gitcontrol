@@ -15,12 +15,13 @@ type FileStatus struct {
 
 // StatusResult é o retorno de Status: metadados do branch + arquivos com mudança.
 type StatusResult struct {
-	Branch   string       `json:"branch"`
-	HeadOID  string       `json:"head_oid"`
-	Upstream string       `json:"upstream,omitempty"`
-	Ahead    int          `json:"ahead,omitempty"`
-	Behind   int          `json:"behind,omitempty"`
-	Files    []FileStatus `json:"files"`
+	Branch    string       `json:"branch"`
+	HeadOID   string       `json:"head_oid"`
+	Upstream  string       `json:"upstream,omitempty"`
+	Ahead     int          `json:"ahead,omitempty"`
+	Behind    int          `json:"behind,omitempty"`
+	Operation Operation    `json:"operation,omitempty"`
+	Files     []FileStatus `json:"files"`
 }
 
 // Commit representa um commit do git.

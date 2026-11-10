@@ -6,7 +6,7 @@ import {
   matches,
 } from "./selectors";
 import { fileCode, formatRelativeTime, initials, shortHash } from "./format";
-import type { Branch, Commit, FileStatus } from "./gg";
+import type { Branch, Commit, FileStatus } from "./gitcontrol";
 
 const branch = (name: string, extra: Partial<Branch> = {}): Branch => ({
   name,

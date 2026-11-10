@@ -17,6 +17,7 @@ export type StatusResult = {
   upstream?: string;
   ahead?: number;
   behind?: number;
+  operation?: "merge" | "cherry-pick";
   files: FileStatus[];
 };
 
@@ -40,16 +41,31 @@ export type ShowResult = {
   diff: string;
 };
 
+export type DiffResult = {
+  path: string;
+  diff: string;
+};
+
+export type Remote = {
+  name: string;
+  url: string;
+};
+
+export type GraphRow = {
+  graph: string;
+  commit?: Commit;
+};
+
 type ErrorBody = { code: string; message: string };
 
 export type Envelope<T> =
   | { ok: true; data: T }
   | { ok: false; error: ErrorBody };
 
-// gg executa o sidecar com o contrato --json e devolve só o data.
+// gitcontrol executa o sidecar com o contrato --json e devolve só o data.
 // O envelope de erro vira uma exceção com "code: message".
-export async function gg<T>(repo: string, ...args: string[]): Promise<T> {
-  const command = Command.sidecar("binaries/gg-cli", ["--json", ...args], {
+export async function runGitControl<T>(repo: string, ...args: string[]): Promise<T> {
+  const command = Command.sidecar("binaries/gitcontrol-cli", ["--json", ...args], {
     cwd: repo,
   });
   const output = await command.execute();
@@ -59,7 +75,7 @@ export async function gg<T>(repo: string, ...args: string[]): Promise<T> {
     envelope = JSON.parse(output.stdout) as Envelope<T>;
   } catch {
     throw new Error(
-      output.stderr.trim() || `gg terminou com código ${output.code}`,
+      output.stderr.trim() || `gitcontrol terminou com código ${output.code}`,
     );
   }
 

@@ -1,4 +1,4 @@
-module github.com/rhyan05/gerenciador-git
+module github.com/rhyan05/gitcontrol
 
 go 1.27.2
 

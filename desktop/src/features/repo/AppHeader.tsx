@@ -1,11 +1,11 @@
-﻿import { FolderOpen, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, FolderOpen, RefreshCw, Search } from "lucide-react";
 import type { RefObject } from "react";
 import { Logo } from "../../components/Logo";
 import { Badge } from "../../components/ui/Badge";
 import { IconButton } from "../../components/ui/IconButton";
 import { Input } from "../../components/ui/Input";
 import { Kbd } from "../../components/ui/Kbd";
-import type { StatusResult } from "../../lib/gg";
+import type { StatusResult } from "../../lib/gitcontrol";
 import { cn } from "../../lib/cn";
 
 export function AppHeader({
@@ -17,6 +17,9 @@ export function AppHeader({
   loading,
   refreshing,
   onRefresh,
+  onFetch,
+  onPull,
+  onPush,
   search,
   onSearchChange,
   searchRef,
@@ -29,6 +32,9 @@ export function AppHeader({
   loading: boolean;
   refreshing: boolean;
   onRefresh: () => void;
+  onFetch: () => void;
+  onPull: () => void;
+  onPush: () => void;
   search: string;
   onSearchChange: (value: string) => void;
   searchRef: RefObject<HTMLInputElement | null>;
@@ -38,7 +44,7 @@ export function AppHeader({
       <div className="flex shrink-0 items-center gap-2">
         <Logo className="h-8 w-8" />
         <div className="leading-none">
-          <p className="text-[14px] font-semibold tracking-tight text-ink">gg</p>
+          <p className="text-[14px] font-semibold tracking-tight text-ink">gitcontrol</p>
           <p className="mt-0.5 text-[11px] text-muted">gerenciador git</p>
         </div>
       </div>
@@ -54,10 +60,10 @@ export function AppHeader({
           }}
           spellCheck={false}
           aria-label="Caminho do repositório"
-          list="gg-recent-repos"
+          list="gitcontrol-recent-repos"
           className="w-full max-w-[380px] bg-surface-2"
         />
-        <datalist id="gg-recent-repos">
+        <datalist id="gitcontrol-recent-repos">
           {recentRepos.map((recent) => (
             <option key={recent} value={recent} />
           ))}
@@ -66,6 +72,24 @@ export function AppHeader({
           label="Escolher pasta do repositório"
           icon={<FolderOpen size={15} />}
           onClick={onPickRepo}
+        />
+        <IconButton
+          label="Fetch do remoto"
+          icon={<Download size={15} />}
+          onClick={onFetch}
+          disabled={loading}
+        />
+        <IconButton
+          label="Pull do branch atual"
+          icon={<ArrowDown size={15} />}
+          onClick={onPull}
+          disabled={loading}
+        />
+        <IconButton
+          label="Push do branch atual"
+          icon={<ArrowUp size={15} />}
+          onClick={onPush}
+          disabled={loading}
         />
         <IconButton
           label="Atualizar repositório"

@@ -6,12 +6,13 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "opener:allow-open-path",
     "dialog:allow-open",
     {
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/gg-cli",
+          "name": "binaries/gitcontrol-cli",
           "sidecar": true,
           "args": true
         }

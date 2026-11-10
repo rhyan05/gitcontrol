@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/rhyan05/gerenciador-git/internal/git"
+	"github.com/rhyan05/gitcontrol/internal/git"
 )
 
 func TestMoveCursor(t *testing.T) {

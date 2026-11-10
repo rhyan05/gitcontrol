@@ -1,37 +1,59 @@
-# gg
+# gitcontrol
 
 Gerenciador de Git com três interfaces sobre o mesmo core:
 
 - **TUI** em Go/Bubble Tea para operar tudo pelo terminal.
-- **CLI JSON** (`gg --json`) com contrato estável para automação.
+- **CLI JSON** (`gitcontrol --json`) com contrato estável para automação.
 - **Desktop** em Tauri + React para uma experiência visual.
 
-![Interface do gg](desktop/docs/gg.png)
+![Interface do gitcontrol](desktop/docs/gitcontrol.png)
 
 ## O que funciona
 
 - Branches: listar, checkout (local e remota com tracking), merge.
-- Commits: log, diff completo, cherry-pick.
-- Working tree: status, stage/unstage por arquivo, commit.
+- Commits: log, grafo ASCII, diff completo, cherry-pick.
+- Working tree: status, diff de arquivo, stage/unstage por arquivo, commit.
+- Remotos: fetch, pull e push (com upstream automático no primeiro push).
+- Conflitos: marcar resolvido, abortar e continuar merge/cherry-pick; edição no
+  editor do sistema/TUI.
+- Multi-repo: vários repositórios abertos com troca de ativo.
 - Refresh automático na TUI (fsnotify + timer) e na GUI (polling curto).
 - Instaladores Windows: `.msi` e `.exe` (NSIS).
 
-Conflitos são reportados; a resolução continua no terminal (`git merge --abort`, editar e `git add`).
-Pull/push/fetch, grafo de commits e multi-repo ainda não fazem parte do escopo.
+## Instalação
+
+### PyPI (CLI + TUI)
+
+```powershell
+pip install gitcontrol
+gitcontrol --version
+gitcontrol
+```
+
+### Go
+
+```powershell
+go install github.com/rhyan05/gitcontrol/cmd/gitcontrol@latest
+```
+
+### Desktop
+
+Baixe o `.msi` ou o instalador NSIS na página de releases do GitHub.
 
 ## Arquitetura
 
 ```text
-cmd/gg/            entrada única: TUI ou --json
-internal/git/      core Go (status, log, branches, show, diff, ações)
+cmd/gitcontrol/    entrada única: TUI, --json ou --version
+internal/git/      core Go (status, log, grafo, remotes, conflitos, ações)
 internal/cli/      contrato JSON (envelope ok/data ou ok/error)
+packaging/pypi/    wheel universal com os binários Go embutidos
 desktop/           app Tauri + React + Tailwind v4
   src/             UI (componentes, features, hooks, sidecar client)
   src-tauri/       runtime Rust, sidecar e ícones
 ```
 
-O desktop não reimplementa Git: ele chama o sidecar `gg --json`, que é o mesmo
-binário do core testado em Go.
+O desktop não reimplementa Git: ele chama o sidecar `gitcontrol --json`, que é
+o mesmo binário do core testado em Go.
 
 ## Requisitos
 
@@ -45,17 +67,27 @@ binário do core testado em Go.
 
 ```powershell
 go test ./...
-go run ./cmd/gg              # abre a TUI
-go run ./cmd/gg --json status
-go run ./cmd/gg --json log
-go run ./cmd/gg --json branches
-go run ./cmd/gg --json show <hash>
-go run ./cmd/gg --json checkout <branch>
-go run ./cmd/gg --json merge <branch>
-go run ./cmd/gg --json cherry-pick <hash>
-go run ./cmd/gg --json stage <path...>
-go run ./cmd/gg --json unstage <path...>
-go run ./cmd/gg --json commit "mensagem"
+go run ./cmd/gitcontrol                 # abre a TUI
+go run ./cmd/gitcontrol --version
+go run ./cmd/gitcontrol --json --repo . status
+go run ./cmd/gitcontrol --json log
+go run ./cmd/gitcontrol --json graph
+go run ./cmd/gitcontrol --json branches
+go run ./cmd/gitcontrol --json show <hash>
+go run ./cmd/gitcontrol --json diff <path>
+go run ./cmd/gitcontrol --json remotes
+go run ./cmd/gitcontrol --json fetch [remote]
+go run ./cmd/gitcontrol --json pull [remote] [branch]
+go run ./cmd/gitcontrol --json push [remote] [branch]
+go run ./cmd/gitcontrol --json checkout <branch>
+go run ./cmd/gitcontrol --json merge <branch>
+go run ./cmd/gitcontrol --json cherry-pick <hash>
+go run ./cmd/gitcontrol --json resolve <path...>
+go run ./cmd/gitcontrol --json abort
+go run ./cmd/gitcontrol --json continue
+go run ./cmd/gitcontrol --json stage <path...>
+go run ./cmd/gitcontrol --json unstage <path...>
+go run ./cmd/gitcontrol --json commit "mensagem"
 ```
 
 O contrato é sempre um objeto JSON:
@@ -66,6 +98,12 @@ O contrato é sempre um objeto JSON:
 ```
 
 Exit code `0` em sucesso e `1` em erro.
+
+Teclas da TUI: `/` não se aplica; use `tab` para trocar de painel, `j/k` para
+mover, `enter` para checkout/diff, `d` para diff do arquivo, `s/u` para
+stage/unstage, `c` para commit, `M` merge, `C` cherry-pick, `f` fetch, `p` pull,
+`P` push, `a` abortar conflito, `x` continuar conflito, `e` editar arquivo em
+conflito e `[`/`]` para trocar de repositório.
 
 ## Desktop
 
@@ -85,8 +123,8 @@ npm run tauri -- build
 
 Artefatos:
 
-- `desktop/src-tauri/target/release/bundle/msi/gg_0.1.0_x64_en-US.msi`
-- `desktop/src-tauri/target/release/bundle/nsis/gg_0.1.0_x64-setup.exe`
+- `desktop/src-tauri/target/release/bundle/msi/gitcontrol_0.1.0_x64_en-US.msi`
+- `desktop/src-tauri/target/release/bundle/nsis/gitcontrol_0.1.0_x64-setup.exe`
 
 Atalhos da GUI: `/` busca, `r` atualiza, `Ctrl/Cmd+K` abre a paleta de comandos,
 `Esc` fecha diálogos. O painel de diff é redimensionável pela alça acima dele.
@@ -95,12 +133,14 @@ Atalhos da GUI: `/` busca, `r` atualiza, `Ctrl/Cmd+K` abre a paleta de comandos,
 
 ```powershell
 go test ./...
+go vet ./...
 cd desktop
 npm run lint
 npm run test
 npm run build
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
 ## Licença
 
-Uso pessoal. Ajuste a licença antes de publicar.
+MIT. Veja [LICENSE](LICENSE).

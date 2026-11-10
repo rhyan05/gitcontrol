@@ -1,6 +1,6 @@
-﻿import { Command, GitBranch } from "lucide-react";
+import { Command, GitBranch } from "lucide-react";
 import { Kbd } from "../../components/ui/Kbd";
-import type { StatusResult } from "../../lib/gg";
+import type { StatusResult } from "../../lib/gitcontrol";
 import { hasWorktreeChange, isStaged } from "../../lib/format";
 
 export function StatusBar({

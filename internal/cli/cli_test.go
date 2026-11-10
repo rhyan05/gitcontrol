@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rhyan05/gerenciador-git/internal/git"
+	"github.com/rhyan05/gitcontrol/internal/git"
 )
 
 // response espelha o envelope para os testes. Data fica cru para cada teste
@@ -166,6 +166,15 @@ func TestUsageErrors(t *testing.T) {
 		{"checkout"},
 		{"merge"},
 		{"cherry-pick"},
+		{"diff"},
+		{"fetch", "a", "b"},
+		{"pull", "a", "b", "c"},
+		{"push", "a", "b", "c"},
+		{"resolve"},
+		{"abort", "extra"},
+		{"continue", "extra"},
+		{"graph", "extra"},
+		{"remotes", "extra"},
 		{"stage"},
 		{"unstage"},
 		{"commit"},
@@ -332,5 +341,66 @@ func TestStageUnstageCommitActions(t *testing.T) {
 	}
 	if len(commits) != 1 || commits[0].Subject != "primeiro commit" {
 		t.Errorf("commits = %+v", commits)
+	}
+}
+
+func TestDiffFile(t *testing.T) {
+	r, dir := newRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "novo.txt"), []byte("linha\n"), 0o644); err != nil {
+		t.Fatalf("escrever: %v", err)
+	}
+
+	resp, code := runCLI(t, r, "diff", "novo.txt")
+	if code != 0 || !resp.OK {
+		t.Fatalf("diff falhou: code=%d resp=%+v", code, resp)
+	}
+
+	var data struct {
+		Path string `json:"path"`
+		Diff string `json:"diff"`
+	}
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		t.Fatalf("decodificar diff: %v", err)
+	}
+	if data.Path != "novo.txt" || !strings.Contains(data.Diff, "+linha") {
+		t.Errorf("diff inesperado: %+v", data)
+	}
+}
+
+func TestGraphCLI(t *testing.T) {
+	r, dir := newRepo(t)
+	writeAndCommit(t, dir, "a.txt", "v1", "primeiro")
+
+	resp, code := runCLI(t, r, "graph")
+	if code != 0 || !resp.OK {
+		t.Fatalf("graph falhou: code=%d resp=%+v", code, resp)
+	}
+
+	var rows []git.GraphRow
+	if err := json.Unmarshal(resp.Data, &rows); err != nil {
+		t.Fatalf("decodificar graph: %v", err)
+	}
+	if len(rows) == 0 || rows[0].Commit == nil || rows[0].Commit.Subject != "primeiro" {
+		t.Errorf("graph inesperado: %+v", rows)
+	}
+}
+
+func TestRemotesCLI(t *testing.T) {
+	r, dir := newRepo(t)
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, filepath.Dir(bare), "init", "--bare", bare)
+	runGit(t, dir, "remote", "add", "origin", bare)
+
+	resp, code := runCLI(t, r, "remotes")
+	if code != 0 || !resp.OK {
+		t.Fatalf("remotes falhou: code=%d resp=%+v", code, resp)
+	}
+
+	var remotes []git.Remote
+	if err := json.Unmarshal(resp.Data, &remotes); err != nil {
+		t.Fatalf("decodificar remotes: %v", err)
+	}
+	if len(remotes) != 1 || remotes[0].Name != "origin" {
+		t.Errorf("remotes = %+v", remotes)
 	}
 }

@@ -6,14 +6,19 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { join } from "@tauri-apps/api/path";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   Check,
+  Download,
+  FilePenLine,
   GitCommitHorizontal,
   GitMerge,
   Minus,
   Plus,
   RefreshCw,
   Search,
+  Upload,
 } from "lucide-react";
 import { Logo } from "./components/Logo";
 import { AppHeader } from "./features/repo/AppHeader";
@@ -31,11 +36,13 @@ import { useToast } from "./components/ui/toast-context";
 import { useRepo } from "./hooks/useRepo";
 import "./App.css";
 import {
-  gg,
+  runGitControl,
   type Branch,
   type Commit,
+  type DiffResult,
+  type FileStatus,
   type ShowResult,
-} from "./lib/gg";
+} from "./lib/gitcontrol";
 import {
   filterBranches,
   filterCommits,
@@ -47,7 +54,14 @@ import { shortHash } from "./lib/format";
 import { cn } from "./lib/cn";
 
 type Pending = {
-  action: "checkout" | "merge" | "cherry-pick";
+  action:
+    | "checkout"
+    | "merge"
+    | "cherry-pick"
+    | "pull"
+    | "push"
+    | "abort"
+    | "continue";
   target: string;
   title: string;
   description: string;
@@ -58,10 +72,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function repoName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
 function loadRecentRepos(): string[] {
   try {
     const parsed: unknown = JSON.parse(
-      localStorage.getItem("gg.recentRepos") ?? "[]",
+      localStorage.getItem("gitcontrol.recentRepos") ?? "[]",
     );
     return Array.isArray(parsed)
       ? parsed.filter((value): value is string => typeof value === "string")
@@ -72,19 +91,20 @@ function loadRecentRepos(): string[] {
 }
 
 function initialDiffHeight(): number {
-  const stored = Number(localStorage.getItem("gg.diffHeight"));
+  const stored = Number(localStorage.getItem("gitcontrol.diffHeight"));
   return Number.isFinite(stored) && stored >= 120 ? stored : 240;
 }
 
 function App() {
   const toast = useToast();
   const [repo, setRepo] = useState(
-    () => localStorage.getItem("gg.repo") ?? "..",
+    () => localStorage.getItem("gitcontrol.repo") ?? "..",
   );
   const [recentRepos, setRecentRepos] = useState(loadRecentRepos);
   const [search, setSearch] = useState("");
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
   const [selectedCommit, setSelectedCommit] = useState<Commit | null>(null);
+  const [selectedFile, setSelectedFile] = useState<FileStatus | null>(null);
   const [diff, setDiff] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState("");
@@ -98,7 +118,8 @@ function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const diffRequest = useRef(0);
 
-  const { status, branches, commits, loading, error, refresh } = useRepo(repo);
+  const { status, branches, commits, graph: graphRows, loading, error, refresh } =
+    useRepo(repo);
 
   const rememberRepo = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -109,7 +130,7 @@ function App() {
         0,
         8,
       );
-      localStorage.setItem("gg.recentRepos", JSON.stringify(next));
+      localStorage.setItem("gitcontrol.recentRepos", JSON.stringify(next));
       return next;
     });
   }, []);
@@ -125,6 +146,7 @@ function App() {
     setRepo(next);
     setSelectedBranch(null);
     setSelectedCommit(null);
+    setSelectedFile(null);
     setDiff("");
     setDiffError("");
     setDiffLoading(false);
@@ -140,11 +162,37 @@ function App() {
     (commit: Commit) => {
       const request = ++diffRequest.current;
       setSelectedCommit(commit);
+      setSelectedFile(null);
       setDiff("");
       setDiffError("");
       setDiffLoading(true);
 
-      void gg<ShowResult>(repo, "show", commit.hash)
+      void runGitControl<ShowResult>(repo, "show", commit.hash)
+        .then((result) => {
+          if (request === diffRequest.current) setDiff(result.diff);
+        })
+        .catch((err: unknown) => {
+          if (request === diffRequest.current) {
+            setDiffError(errorMessage(err));
+          }
+        })
+        .finally(() => {
+          if (request === diffRequest.current) setDiffLoading(false);
+        });
+    },
+    [repo],
+  );
+
+  const selectFile = useCallback(
+    (file: FileStatus) => {
+      const request = ++diffRequest.current;
+      setSelectedCommit(null);
+      setSelectedFile(file);
+      setDiff("");
+      setDiffError("");
+      setDiffLoading(true);
+
+      void runGitControl<DiffResult>(repo, "diff", file.path)
         .then((result) => {
           if (request === diffRequest.current) setDiff(result.diff);
         })
@@ -161,11 +209,15 @@ function App() {
   );
 
   useEffect(() => {
-    localStorage.setItem("gg.repo", repo);
+    localStorage.setItem("gitcontrol.repo", repo);
   }, [repo]);
 
   useEffect(() => {
-    localStorage.setItem("gg.diffHeight", String(diffHeight));
+    rememberRepo(repo);
+  }, [rememberRepo, repo]);
+
+  useEffect(() => {
+    localStorage.setItem("gitcontrol.diffHeight", String(diffHeight));
   }, [diffHeight]);
 
   useEffect(() => {
@@ -205,13 +257,14 @@ function App() {
     ): Promise<boolean> => {
       setBusy(true);
       try {
-        await gg<null>(repo, ...args);
+        await runGitControl<null>(repo, ...args);
         await refresh(true);
 
         if (resetSelection) {
           diffRequest.current++;
           setSelectedBranch(null);
           setSelectedCommit(null);
+          setSelectedFile(null);
           setDiff("");
           setDiffError("");
           setDiffLoading(false);
@@ -248,6 +301,57 @@ function App() {
     [runAction],
   );
 
+  const fetchRemote = useCallback(() => {
+    void runAction(["fetch"], "fetch concluído", false);
+  }, [runAction]);
+
+  const startRemote = useCallback(
+    (action: "pull" | "push") => {
+      setPending({
+        action,
+        target: "",
+        title: action === "pull" ? "Pull do branch atual?" : "Push do branch atual?",
+        description:
+          action === "pull"
+            ? "As mudanças remotas serão incorporadas com merge. Conflitos precisam ser resolvidos."
+            : "O branch atual será enviado para o remoto configurado.",
+        confirmLabel: action === "pull" ? "Fazer pull" : "Fazer push",
+      });
+    },
+    [],
+  );
+
+  const startAbort = useCallback(() => {
+    if (!status?.operation) return;
+    setPending({
+      action: "abort",
+      target: status.operation,
+      title: `Abortar ${status.operation}?`,
+      description: "A operação em andamento será desfeita.",
+      confirmLabel: "Abortar",
+    });
+  }, [status]);
+
+  const startContinue = useCallback(() => {
+    if (!status?.operation) return;
+    setPending({
+      action: "continue",
+      target: status.operation,
+      title: `Continuar ${status.operation}?`,
+      description:
+        "Os arquivos já marcados como resolvidos serão usados para concluir a operação.",
+      confirmLabel: "Continuar",
+    });
+  }, [status]);
+
+  async function openFile(file: FileStatus) {
+    try {
+      await openPath(await join(repo, file.path));
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
   async function commit() {
     const message = commitMessage.trim();
     if (!message) return;
@@ -259,10 +363,12 @@ function App() {
   async function executePending() {
     if (!pending) return;
 
-    const done = await runAction(
-      [pending.action, pending.target],
-      `${pending.action}: ${pending.target}`,
-    );
+    const single = ["pull", "push", "abort", "continue"].includes(pending.action);
+    const args = single ? [pending.action] : [pending.action, pending.target];
+    const label = pending.target
+      ? `${pending.action}: ${pending.target}`
+      : pending.action;
+    const done = await runAction(args, label);
     if (done) setPending(null);
   }
 
@@ -333,6 +439,13 @@ function App() {
   const filteredFiles = filterFiles(files, search);
   const groups = groupStatus(filteredFiles);
   const totalFiles = filteredFiles.length;
+  const graphMap = Object.fromEntries(
+    graphRows
+      .filter((row): row is { graph: string; commit: Commit } =>
+        Boolean(row.commit),
+      )
+      .map((row) => [row.commit.hash, row.graph]),
+  );
 
   const stageAllPaths = Array.from(
     new Set([
@@ -358,7 +471,63 @@ function App() {
       icon: <Search size={14} />,
       run: focusSearch,
     },
+    {
+      id: "fetch",
+      label: "Fetch do remoto",
+      icon: <Download size={14} />,
+      run: fetchRemote,
+    },
+    {
+      id: "pull",
+      label: `Pull em ${status?.branch ?? "HEAD"}`,
+      icon: <GitMerge size={14} />,
+      run: () => startRemote("pull"),
+    },
+    {
+      id: "push",
+      label: `Push de ${status?.branch ?? "HEAD"}`,
+      icon: <Upload size={14} />,
+      run: () => startRemote("push"),
+    },
   ];
+
+  if (status?.operation) {
+    commands.push(
+      {
+        id: "continue",
+        label: `Continuar ${status.operation}`,
+        icon: <Check size={14} />,
+        run: startContinue,
+      },
+      {
+        id: "abort",
+        label: `Abortar ${status.operation}`,
+        icon: <Minus size={14} />,
+        run: startAbort,
+      },
+    );
+  }
+
+  if (selectedFile) {
+    commands.push(
+      {
+        id: "open-file",
+        label: `Abrir ${selectedFile.path} no editor`,
+        icon: <FilePenLine size={14} />,
+        run: () => void openFile(selectedFile),
+      },
+      ...(selectedFile.unmerged
+        ? [
+            {
+              id: "resolve-file",
+              label: `Marcar ${selectedFile.path} como resolvido`,
+              icon: <Check size={14} />,
+              run: () => stage([selectedFile.path]),
+            },
+          ]
+        : []),
+    );
+  }
 
   if (selectedBranch && !selectedBranch.head) {
     commands.push(
@@ -437,10 +606,37 @@ function App() {
         loading={loading}
         refreshing={manualRefreshing}
         onRefresh={refreshRepo}
+        onFetch={fetchRemote}
+        onPull={() => startRemote("pull")}
+        onPush={() => startRemote("push")}
         search={search}
         onSearchChange={setSearch}
         searchRef={searchRef}
       />
+
+      {recentRepos.length > 1 && (
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line bg-surface px-3 py-1">
+          <span className="mr-1 text-[10px] uppercase tracking-[0.14em] text-muted">
+            repos
+          </span>
+          {recentRepos.map((recent) => (
+            <button
+              key={recent}
+              type="button"
+              onClick={() => changeRepo(recent)}
+              title={recent}
+              className={cn(
+                "shrink-0 rounded px-2 py-0.5 font-mono text-[11px] transition",
+                recent === repo
+                  ? "bg-accent/15 text-accent"
+                  : "text-muted hover:bg-surface-2 hover:text-ink",
+              )}
+            >
+              {repoName(recent)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <div className="mx-2 mt-2 flex shrink-0 items-center gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 font-mono text-[12px] text-danger">
@@ -485,6 +681,7 @@ function App() {
 
             <CommitPanel
               commits={filteredCommits}
+              graph={graphMap}
               selected={selectedCommit}
               onSelect={selectCommit}
               onCherryPick={() => {
@@ -509,11 +706,17 @@ function App() {
               query={search}
               loading={loading}
               busy={busy}
+              operation={status?.operation}
+              selectedFile={selectedFile}
               commitMessage={commitMessage}
               onCommitMessageChange={setCommitMessage}
               onCommit={() => void commit()}
               onStage={stage}
               onUnstage={unstage}
+              onSelectFile={selectFile}
+              onOpenFile={(file) => void openFile(file)}
+              onAbort={startAbort}
+              onContinue={startContinue}
             />
           </div>
         </div>
@@ -548,6 +751,7 @@ function App() {
         >
           <DiffPanel
             selected={selectedCommit}
+            selectedFile={selectedFile}
             diff={diff}
             loading={diffLoading}
             error={diffError}

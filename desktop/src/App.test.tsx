@@ -3,13 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { ToastProvider } from "./components/ui/Toast";
-import { gg } from "./lib/gg";
-import type { Branch, Commit, StatusResult } from "./lib/gg";
+import { runGitControl } from "./lib/gitcontrol";
+import type { Branch, Commit, StatusResult } from "./lib/gitcontrol";
 
-vi.mock("./lib/gg", () => ({ gg: vi.fn() }));
+vi.mock("./lib/gitcontrol", () => ({ runGitControl: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
-const ggMock = vi.mocked(gg);
+const runMock = vi.mocked(runGitControl);
 
 const branches: Branch[] = [{ name: "master", head: true }];
 const commits: Commit[] = [
@@ -37,7 +37,7 @@ function statusWith(extra: Partial<StatusResult> = {}): StatusResult {
 }
 
 function mockRepo(status: StatusResult) {
-  ggMock.mockImplementation(
+  runMock.mockImplementation(
     (async (_repo: string, ...args: string[]) => {
       switch (args[0]) {
         case "status":
@@ -46,12 +46,16 @@ function mockRepo(status: StatusResult) {
           return branches;
         case "log":
           return commits;
+        case "graph":
+          return commits.map((commit) => ({ graph: "*", commit }));
         case "show":
           return { hash: commits[0].hash, diff: "+linha nova" };
+        case "diff":
+          return { path: args[1], diff: "+linha nova" };
         default:
           return null;
       }
-    }) as typeof gg,
+    }) as typeof runGitControl,
   );
 }
 
@@ -65,7 +69,7 @@ function renderApp() {
 
 beforeEach(() => {
   localStorage.clear();
-  ggMock.mockReset();
+  runMock.mockReset();
 });
 
 describe("App", () => {
@@ -89,7 +93,7 @@ describe("App", () => {
     await user.click(stageButton);
 
     await waitFor(() => {
-      expect(ggMock).toHaveBeenCalledWith(
+      expect(runMock).toHaveBeenCalledWith(
         expect.any(String),
         "stage",
         "src/App.tsx",
@@ -114,7 +118,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Commit" }));
 
     await waitFor(() => {
-      expect(ggMock).toHaveBeenCalledWith(
+      expect(runMock).toHaveBeenCalledWith(
         expect.any(String),
         "commit",
         "nova feature",
@@ -134,7 +138,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Aplicar commit" }));
 
     await waitFor(() => {
-      expect(ggMock).toHaveBeenCalledWith(
+      expect(runMock).toHaveBeenCalledWith(
         expect.any(String),
         "cherry-pick",
         "abcdef1234567890",

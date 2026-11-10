@@ -1,4 +1,4 @@
-import { CheckCircle2, Minus, Plus, TriangleAlert } from "lucide-react";
+import { CheckCircle2, FilePenLine, Minus, Plus, TriangleAlert } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { IconButton } from "../../components/ui/IconButton";
@@ -6,7 +6,7 @@ import { Input } from "../../components/ui/Input";
 import { Panel } from "../../components/ui/Panel";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { cn } from "../../lib/cn";
-import type { FileStatus } from "../../lib/gg";
+import type { FileStatus } from "../../lib/gitcontrol";
 import { fileCode } from "../../lib/format";
 import type { StatusGroups } from "../../lib/selectors";
 
@@ -25,22 +25,34 @@ export function StatusPanel({
   query,
   loading,
   busy,
+  operation,
+  selectedFile,
   commitMessage,
   onCommitMessageChange,
   onCommit,
   onStage,
   onUnstage,
+  onSelectFile,
+  onOpenFile,
+  onAbort,
+  onContinue,
 }: {
   groups: StatusGroups;
   total: number;
   query: string;
   loading: boolean;
   busy: boolean;
+  operation?: "merge" | "cherry-pick";
+  selectedFile: FileStatus | null;
   commitMessage: string;
   onCommitMessageChange: (value: string) => void;
   onCommit: () => void;
   onStage: (paths: string[]) => void;
   onUnstage: (paths: string[]) => void;
+  onSelectFile: (file: FileStatus) => void;
+  onOpenFile: (file: FileStatus) => void;
+  onAbort: () => void;
+  onContinue: () => void;
 }) {
   const canCommit = groups.staged.length > 0 && commitMessage.trim().length > 0;
 
@@ -80,6 +92,22 @@ export function StatusPanel({
         </form>
       }
     >
+      {operation && (
+        <div className="flex items-center gap-2 border-b border-line bg-warning/10 px-3 py-1.5">
+          <TriangleAlert size={12} className="text-warning" />
+          <span className="text-[11px] text-warning">
+            {operation} em andamento
+          </span>
+          <div className="ml-auto flex gap-1">
+            <Button onClick={onContinue} disabled={busy} className="h-6 px-2">
+              Continuar
+            </Button>
+            <Button onClick={onAbort} disabled={busy} className="h-6 px-2">
+              Abortar
+            </Button>
+          </div>
+        </div>
+      )}
       {loading ? (
         <Skeleton rows={7} />
       ) : total === 0 ? (
@@ -103,6 +131,9 @@ export function StatusPanel({
             busy={busy}
             onStage={onStage}
             onUnstage={onUnstage}
+            selectedFile={selectedFile}
+            onSelectFile={onSelectFile}
+            onOpenFile={onOpenFile}
           />
           <StatusGroup
             title="Staged"
@@ -113,6 +144,9 @@ export function StatusPanel({
             busy={busy}
             onStage={onStage}
             onUnstage={onUnstage}
+            selectedFile={selectedFile}
+            onSelectFile={onSelectFile}
+            onOpenFile={onOpenFile}
           />
           <StatusGroup
             title="Alterações"
@@ -123,6 +157,9 @@ export function StatusPanel({
             busy={busy}
             onStage={onStage}
             onUnstage={onUnstage}
+            selectedFile={selectedFile}
+            onSelectFile={onSelectFile}
+            onOpenFile={onOpenFile}
           />
           <StatusGroup
             title="Untracked"
@@ -133,6 +170,9 @@ export function StatusPanel({
             busy={busy}
             onStage={onStage}
             onUnstage={onUnstage}
+            selectedFile={selectedFile}
+            onSelectFile={onSelectFile}
+            onOpenFile={onOpenFile}
           />
         </>
       )}
@@ -149,6 +189,9 @@ function StatusGroup({
   busy,
   onStage,
   onUnstage,
+  selectedFile,
+  onSelectFile,
+  onOpenFile,
 }: {
   title: string;
   tone: GroupTone;
@@ -158,6 +201,9 @@ function StatusGroup({
   busy: boolean;
   onStage: (paths: string[]) => void;
   onUnstage: (paths: string[]) => void;
+  selectedFile: FileStatus | null;
+  onSelectFile: (file: FileStatus) => void;
+  onOpenFile: (file: FileStatus) => void;
 }) {
   if (files.length === 0) return null;
 
@@ -192,7 +238,10 @@ function StatusGroup({
       {files.map((file) => (
         <div
           key={`${title}:${file.path}:${fileCode(file)}`}
-          className="group flex items-center gap-2 px-3 py-1.5 transition hover:bg-surface-2"
+          className={cn(
+            "group flex items-center gap-2 px-3 py-1.5 transition hover:bg-surface-2",
+            selectedFile?.path === file.path && "bg-accent/10",
+          )}
         >
           {file.unmerged ? (
             <TriangleAlert size={12} className="shrink-0 text-danger" />
@@ -206,9 +255,22 @@ function StatusGroup({
               {fileCode(file)}
             </span>
           )}
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink/90">
+          <button
+            type="button"
+            onClick={() => onSelectFile(file)}
+            className="min-w-0 flex-1 truncate text-left font-mono text-[12px] text-ink/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          >
             {file.path}
-          </span>
+          </button>
+          {file.unmerged && (
+            <IconButton
+              label={`Abrir ${file.path} no editor`}
+              icon={<FilePenLine size={13} />}
+              disabled={busy}
+              onClick={() => onOpenFile(file)}
+              className="h-6 w-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            />
+          )}
           <IconButton
             label={
               action === "stage"

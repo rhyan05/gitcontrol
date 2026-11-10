@@ -1,4 +1,4 @@
-import type { Branch, Commit, FileStatus } from "./gg";
+import type { Branch, Commit, FileStatus } from "./gitcontrol";
 import { hasWorktreeChange, isStaged } from "./format";
 
 export function matches(text: string, query: string): boolean {

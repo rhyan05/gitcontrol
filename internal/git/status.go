@@ -72,6 +72,10 @@ func (r *Repo) Status(ctx context.Context) (*StatusResult, error) {
 		}
 	}
 
+	if dir, err := r.GitDir(ctx); err == nil {
+		result.Operation = detectOperation(dir)
+	}
+
 	return result, nil
 }
 

@@ -5,7 +5,7 @@ import { IconButton } from "../../components/ui/IconButton";
 import { Panel } from "../../components/ui/Panel";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { cn } from "../../lib/cn";
-import type { Commit } from "../../lib/gg";
+import type { Commit } from "../../lib/gitcontrol";
 import {
   formatAbsoluteTime,
   formatRelativeTime,
@@ -15,6 +15,7 @@ import {
 
 export function CommitPanel({
   commits,
+  graph,
   selected,
   onSelect,
   onCherryPick,
@@ -24,6 +25,7 @@ export function CommitPanel({
   query,
 }: {
   commits: Commit[];
+  graph: Record<string, string>;
   selected: Commit | null;
   onSelect: (commit: Commit) => void;
   onCherryPick: () => void;
@@ -77,6 +79,9 @@ export function CommitPanel({
                 onClick={() => onSelect(commit)}
                 className="flex min-w-0 flex-1 items-start gap-2 px-3 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
               >
+                <span className="mt-0.5 shrink-0 font-mono text-[11px] text-accent/80">
+                  {graph[commit.hash] ?? "*"}
+                </span>
                 <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-2 text-[9px] font-semibold text-muted">
                   {initials(commit.author)}
                 </span>

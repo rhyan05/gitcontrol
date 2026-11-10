@@ -64,6 +64,8 @@ func (r *Repo) run(ctx context.Context, args ...string) (stdout, stderr []byte, 
 	//    LC_ALL=C              : mensagens de erro em inglês — parseáveis.
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
+		"GIT_EDITOR=true",
+		"GIT_SEQUENCE_EDITOR=true",
 		"LC_ALL=C",
 	)
 

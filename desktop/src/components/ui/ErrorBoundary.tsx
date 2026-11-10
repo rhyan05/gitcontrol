@@ -14,7 +14,7 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("gg crash:", error, info.componentStack);
+    console.error("gitcontrol crash:", error, info.componentStack);
   }
 
   render() {

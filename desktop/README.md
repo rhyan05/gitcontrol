@@ -1,8 +1,16 @@
-# gg desktop
+# gitcontrol desktop
 
-Interface Tauri + React do [gg](../README.md).
+Interface Tauri + React do [gitcontrol](../README.md).
 
-![Interface](docs/gg.png)
+![Interface](docs/gitcontrol.png)
+
+## Recursos
+
+- Branches, commits (com grafo), diff de commit e diff de arquivo do working tree.
+- Stage/unstage por arquivo e commit.
+- Fetch, pull e push pelo header ou pela paleta (`Ctrl/Cmd+K`).
+- Conflitos: abrir no editor, marcar como resolvido, continuar ou abortar.
+- Vários repositórios abertos, com troca pela barra de repos e lista persistida.
 
 ## Desenvolvimento
 
@@ -16,7 +24,7 @@ npm run tauri -- dev
 > **Desktop development with C++** do Visual Studio Build Tools.
 
 O Tauri executa `npm run sidecar` antes de iniciar: o binário Go é compilado em
-`src-tauri/binaries/gg-cli-<target-triple>.exe` e embarcado como sidecar.
+`src-tauri/binaries/gitcontrol-cli-<target-triple>.exe` e embarcado como sidecar.
 
 ## Scripts
 
@@ -40,5 +48,5 @@ src/
   lib/             sidecar client, seletores, formatadores, cn()
 ```
 
-A UI é uma casca fina sobre o contrato `gg --json`; toda a lógica de Git fica no
+A UI é uma casca fina sobre o contrato `gitcontrol --json`; toda a lógica de Git fica no
 core Go e é coberta pelos testes dele.

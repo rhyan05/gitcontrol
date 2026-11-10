@@ -5,7 +5,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { Panel } from "../../components/ui/Panel";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { cn } from "../../lib/cn";
-import type { Branch } from "../../lib/gg";
+import type { Branch } from "../../lib/gitcontrol";
 
 function branchKey(branch: Branch): string {
   return `${branch.remote ? "r" : "l"}:${branch.name}`;

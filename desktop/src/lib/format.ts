@@ -1,4 +1,4 @@
-import type { FileStatus } from "./gg";
+import type { FileStatus } from "./gitcontrol";
 
 export function shortHash(hash: string): string {
   return hash.slice(0, 7);

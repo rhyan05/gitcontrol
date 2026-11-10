@@ -1,5 +1,14 @@
-/gg
+/gitcontrol
 *.exe
 .idea/
 .vscode/
 
+.env
+
+/packaging/pypi/gitcontrol/bin/
+/build/
+/dist/
+*.egg-info/
+__pycache__/
+*.pyc
+.venv/

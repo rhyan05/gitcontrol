@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  gg,
+  runGitControl,
   type Branch,
   type Commit,
+  type GraphRow,
   type StatusResult,
-} from "../lib/gg";
+} from "../lib/gitcontrol";
 
 const POLL_MS = 3000;
 
@@ -12,19 +13,21 @@ export type RepoData = {
   status: StatusResult | null;
   branches: Branch[];
   commits: Commit[];
+  graph: GraphRow[];
 };
 
 const emptyData: RepoData = {
   status: null,
   branches: [],
   commits: [],
+  graph: [],
 };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Carrega status/branches/commits e mantém a tela viva com polling curto.
+// Carrega status/branches/commits/grafo e mantém a tela viva com polling curto.
 // O refresh silencioso não acende o skeleton.
 export function useRepo(repo: string) {
   const [data, setData] = useState<RepoData>(emptyData);
@@ -43,14 +46,15 @@ export function useRepo(repo: string) {
       }
 
       try {
-        const [status, branches, commits] = await Promise.all([
-          gg<StatusResult>(repo, "status"),
-          gg<Branch[]>(repo, "branches"),
-          gg<Commit[]>(repo, "log"),
+        const [status, branches, commits, graph] = await Promise.all([
+          runGitControl<StatusResult>(repo, "status"),
+          runGitControl<Branch[]>(repo, "branches"),
+          runGitControl<Commit[]>(repo, "log"),
+          runGitControl<GraphRow[]>(repo, "graph"),
         ]);
         if (id !== requestId.current) return;
 
-        setData({ status, branches, commits });
+        setData({ status, branches, commits, graph });
         setError("");
       } catch (err) {
         if (id === requestId.current) {

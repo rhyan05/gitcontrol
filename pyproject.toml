@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gitcontrol"
+version = "0.1.0"
+description = "Gerenciador de Git com TUI, CLI JSON e app desktop"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "rhyan05" }]
+keywords = ["git", "tui", "cli", "git-manager"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+
+[project.urls]
+Homepage = "https://github.com/rhyan05/gitcontrol"
+Source = "https://github.com/rhyan05/gitcontrol"
+Issues = "https://github.com/rhyan05/gitcontrol/issues"
+
+[project.scripts]
+gitcontrol = "gitcontrol.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "packaging/pypi" }
+packages = ["gitcontrol"]
+
+[tool.setuptools.package-data]
+gitcontrol = ["bin/*"]

@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/rhyan05/gerenciador-git/internal/git"
+	"github.com/rhyan05/gitcontrol/internal/git"
 )
 
 // Índices dos painéis. A ordem aqui é a ordem em que eles aparecem na tela,
@@ -39,6 +41,10 @@ const (
 	actionCheckout confirmAction = iota
 	actionMerge
 	actionCherryPick
+	actionPull
+	actionPush
+	actionAbort
+	actionContinue
 )
 
 // Estilos estáticos da TUI.
@@ -94,9 +100,15 @@ var (
 type model struct {
 	repo *git.Repo
 
+	// Multi-repo: todos os caminhos abertos e o índice do ativo. m.repo é
+	// sempre o Repo do índice atual.
+	repoPaths []string
+	repoIndex int
+
 	// Dados carregados do repositório. Ficam no model para View ser pura.
 	branches []git.Branch
 	commits  []git.Commit
+	graph    map[string]string
 	status   *git.StatusResult
 
 	// Erros separados por fonte: se "git status" falhar, ainda mostramos
@@ -154,6 +166,8 @@ type loadedMsg struct {
 	branchesErr error
 	commits     []git.Commit
 	commitsErr  error
+	graph       []git.GraphRow
+	graphErr    error
 	status      *git.StatusResult
 	statusErr   error
 }
@@ -166,17 +180,20 @@ type diffMsg struct {
 	err  error
 }
 
-// run abre o repositório do diretório atual e inicia o loop do Bubbletea.
+// run abre o repositório informado (ou o diretório atual) e inicia a TUI.
 //
 // WithAltScreen usa a tela alternativa: ao sair, o conteúdo anterior do
 // terminal volta intacto (nada de poluir o scrollback com frames da TUI).
-func run() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("obter cwd: %w", err)
+func run(repos []string) error {
+	if len(repos) == 0 {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("obter cwd: %w", err)
+		}
+		repos = []string{cwd}
 	}
 
-	repo := git.New(cwd)
+	repo := git.New(repos[0])
 
 	// Watcher é opcional: se fsnotify falhar (permissão, .git exótico),
 	// seguimos só com o timer de fallback. O defer fecha ao sair da TUI.
@@ -189,10 +206,10 @@ func run() error {
 
 	p := tea.NewProgram(
 		// Tamanho inicial de fallback; o WindowSizeMsg real chega logo depois.
-		model{repo: repo, watcher: watcher, width: 80, height: 24},
+		model{repo: repo, repoPaths: repos, repoIndex: 0, watcher: watcher, width: 80, height: 24},
 		tea.WithAltScreen(),
 	)
-	_, err = p.Run()
+	_, err := p.Run()
 	return err
 }
 
@@ -201,12 +218,15 @@ func run() error {
 func (m model) loadAll() tea.Msg {
 	branches, bErr := m.repo.Branches(context.Background())
 	commits, cErr := m.repo.Log(context.Background(), 50)
+	graph, gErr := m.repo.Graph(context.Background(), 50)
 	status, sErr := m.repo.Status(context.Background())
 	return loadedMsg{
 		branches:    branches,
 		branchesErr: bErr,
 		commits:     commits,
 		commitsErr:  cErr,
+		graph:       graph,
+		graphErr:    gErr,
 		status:      status,
 		statusErr:   sErr,
 	}
@@ -288,6 +308,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "C":
 			// Cherry-pick do commit selecionado (com confirmação).
 			m.startCherryPick()
+		case "f":
+			// Fetch é read-only: roda direto, sem confirmação.
+			return m, m.fetch()
+		case "p":
+			m.startPull()
+		case "P":
+			m.startPush()
+		case "a":
+			m.startAbort()
+		case "x":
+			m.startContinue()
+		case "e":
+			if cmd := m.editSelected(); cmd != nil {
+				return m, cmd
+			}
+		case "[":
+			return m, m.switchRepo(-1)
+		case "]":
+			return m, m.switchRepo(1)
 		case "d":
 			// Diff do arquivo selecionado no working tree (5f).
 			if cmd := m.showSelectedFile(); cmd != nil {
@@ -323,6 +362,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Copia os dados para o model. A partir daqui View já pode renderizar.
 		m.branches = msg.branches
 		m.commits = msg.commits
+		m.graph = make(map[string]string, len(msg.graph))
+		for _, row := range msg.graph {
+			if row.Commit != nil {
+				m.graph[row.Commit.Hash] = row.Graph
+			}
+		}
 		m.status = msg.status
 		m.branchesErr = msg.branchesErr
 		m.commitsErr = msg.commitsErr
@@ -450,6 +495,122 @@ func (m *model) startCherryPick() {
 	m.notice = ""
 }
 
+// startPull arma o pull do branch atual.
+func (m *model) startPull() {
+	m.mode = modeConfirm
+	m.pendingAction = actionPull
+	m.pendingTarget = m.currentBranch()
+	m.notice = ""
+}
+
+// startPush arma o push do branch atual.
+func (m *model) startPush() {
+	m.mode = modeConfirm
+	m.pendingAction = actionPush
+	m.pendingTarget = m.currentBranch()
+	m.notice = ""
+}
+
+// startAbort arma o abort da operação em andamento (merge/cherry-pick).
+func (m *model) startAbort() {
+	if m.status == nil || m.status.Operation == git.OperationNone {
+		m.notice = "nenhuma operação em andamento"
+		return
+	}
+	m.mode = modeConfirm
+	m.pendingAction = actionAbort
+	m.pendingTarget = string(m.status.Operation)
+	m.notice = ""
+}
+
+// startContinue arma a conclusão da operação em andamento.
+func (m *model) startContinue() {
+	if m.status == nil || m.status.Operation == git.OperationNone {
+		m.notice = "nenhuma operação em andamento"
+		return
+	}
+	m.mode = modeConfirm
+	m.pendingAction = actionContinue
+	m.pendingTarget = string(m.status.Operation)
+	m.notice = ""
+}
+
+// fetch roda direto: é read-only e não muda o working tree.
+func (m *model) fetch() tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		if err := repo.Fetch(context.Background(), ""); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{notice: "fetch concluído"}
+	}
+}
+
+// editSelected abre o arquivo conflitado no editor do usuário.
+func (m *model) editSelected() tea.Cmd {
+	if m.focus != focusStatus {
+		return nil
+	}
+	files := m.visibleStatus()
+	if len(files) == 0 {
+		return nil
+	}
+	file := files[m.cursor[focusStatus]]
+	if !file.IsUnmerged {
+		m.notice = "arquivo não está em conflito"
+		return nil
+	}
+
+	editor := strings.TrimSpace(os.Getenv("EDITOR"))
+	if editor == "" {
+		if runtime.GOOS == "windows" {
+			editor = "notepad"
+		} else {
+			editor = "vi"
+		}
+	}
+	parts := strings.Fields(editor)
+	args := append(parts[1:], file.Path)
+	cmd := exec.Command(parts[0], args...)
+
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{notice: "editado: " + file.Path + " (s para marcar resolvido)"}
+	})
+}
+
+// switchRepo troca o repositório ativo e recria o watcher.
+func (m *model) switchRepo(delta int) tea.Cmd {
+	if len(m.repoPaths) <= 1 {
+		return nil
+	}
+	if m.watcher != nil {
+		m.watcher.Close()
+		m.watcher = nil
+	}
+
+	m.repoIndex = (m.repoIndex + delta + len(m.repoPaths)) % len(m.repoPaths)
+	m.repo = git.New(m.repoPaths[m.repoIndex])
+	m.loaded = false
+	m.branches = nil
+	m.commits = nil
+	m.graph = nil
+	m.status = nil
+	m.cursor = [numPanels]int{}
+
+	if watcher, err := newGitWatcher(context.Background(), m.repo); err == nil {
+		m.watcher = watcher
+	}
+
+	cmds := []tea.Cmd{m.loadAll}
+	if cmd := m.waitForGitChange(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return tea.Batch(cmds...)
+}
+
 // runConfirmed executa a ação que estava aguardando y.
 // O I/O acontece na closure; Update apenas lê o resultado via actionMsg.
 func (m *model) runConfirmed() tea.Cmd {
@@ -475,6 +636,18 @@ func (m *model) runConfirmed() tea.Cmd {
 		case actionCherryPick:
 			err = repo.CherryPick(context.Background(), target)
 			notice = "cherry-pick: " + shortHash(target)
+		case actionPull:
+			err = repo.Pull(context.Background(), "", "")
+			notice = "pull concluído"
+		case actionPush:
+			err = repo.Push(context.Background(), "", "")
+			notice = "push concluído"
+		case actionAbort:
+			err = repo.Abort(context.Background())
+			notice = "operação abortada"
+		case actionContinue:
+			err = repo.Continue(context.Background())
+			notice = "operação concluída"
 		}
 
 		if err != nil {
@@ -640,14 +813,25 @@ func (m model) footerText() string {
 			text = "merge " + m.pendingTarget + " em " + m.currentBranch() + "?"
 		case actionCherryPick:
 			text = "cherry-pick " + shortHash(m.pendingTarget) + " em " + m.currentBranch() + "?"
+		case actionPull:
+			text = "pull em " + m.currentBranch() + "?"
+		case actionPush:
+			text = "push de " + m.currentBranch() + "?"
+		case actionAbort:
+			text = "abortar " + m.pendingTarget + "?"
+		case actionContinue:
+			text = "continuar " + m.pendingTarget + "?"
 		}
 		text += " (y/n)"
 	default:
-		// Ordem proposital: ações (merge/cherry-pick) antes das teclas de
-		// navegação, para não serem cortadas em terminal de 80 colunas.
-		text = "q sair │ tab │ j/k │ M merge │ C cherry-pick │ enter │ d diff │ s/u stage │ c commit"
+		// Ordem proposital: ações antes das teclas de navegação, para não
+		// serem cortadas em terminal de 80 colunas.
+		text = "q sair │ tab │ j/k │ M merge │ C cherry-pick │ f fetch │ p pull │ P push │ a/x conflito │ enter │ d diff │ s/u stage │ c commit"
 		if m.diffOpen {
 			text = "esc fechar │ pgup/pgdn scroll │ home/end topo/fim │ q sair"
+		}
+		if len(m.repoPaths) > 1 {
+			text = fmt.Sprintf("[%d/%d] %s │ ", m.repoIndex+1, len(m.repoPaths), m.repoPaths[m.repoIndex]) + text
 		}
 	}
 
@@ -922,15 +1106,19 @@ func (m model) commitLines() []string {
 	lines := make([]string, 0, len(m.commits))
 	for i, c := range m.commits {
 		hash := shortHash(c.Hash)
+		prefix := m.graph[c.Hash]
+		if prefix == "" {
+			prefix = "*"
+		}
 
 		if m.isSelected(focusCommits, i) {
 			// Sem hashStyle aqui: cor interna + reset apagaria o fundo
 			// do highlight no meio da linha.
-			lines = append(lines, m.selectedLine(hash+" "+c.Subject))
+			lines = append(lines, m.selectedLine(prefix+" "+hash+" "+c.Subject))
 			continue
 		}
 
-		lines = append(lines, "  "+hashStyle.Render(hash)+" "+c.Subject)
+		lines = append(lines, "  "+prefix+" "+hashStyle.Render(hash)+" "+c.Subject)
 	}
 	return lines
 }

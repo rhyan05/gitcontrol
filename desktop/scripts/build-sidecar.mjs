@@ -1,12 +1,12 @@
-﻿// Compila o CLI Go como sidecar do Tauri.
+// Compila o CLI Go como sidecar do Tauri.
 //
 // O Tauri exige o sufixo do target triple no nome do binário:
-//   src-tauri/binaries/gg-cli-x86_64-pc-windows-msvc.exe
-// O `externalBin` no tauri.conf.json aponta para "binaries/gg-cli" e o Tauri
+//   src-tauri/binaries/gitcontrol-cli-x86_64-pc-windows-msvc.exe
+// O `externalBin` no tauri.conf.json aponta para "binaries/gitcontrol-cli" e o Tauri
 // resolve o sufixo sozinho em dev e no bundle.
 //
-// O nome tem "gg-cli" (e não "gg") porque o binário do app também se chama
-// gg.exe: o sidecar é resolvido ao lado do executável e os dois colidiriam.
+// O nome tem "gitcontrol-cli" (e não "gitcontrol") porque o binário do app também se chama
+// gitcontrol.exe: o sidecar é resolvido ao lado do executável e os dois colidiriam.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -30,9 +30,9 @@ if (!target) {
 const outDir = join(desktopDir, "src-tauri", "binaries");
 mkdirSync(outDir, { recursive: true });
 
-const out = join(outDir, `gg-cli-${target}${exe}`);
-console.log(`[gg] compilando sidecar -> ${out}`);
-execFileSync("go", ["build", "-o", out, "./cmd/gg"], {
+const out = join(outDir, `gitcontrol-cli-${target}${exe}`);
+console.log(`[gitcontrol] compilando sidecar -> ${out}`);
+execFileSync("go", ["build", "-o", out, "./cmd/gitcontrol"], {
   cwd: repoRoot,
   stdio: "inherit",
 });

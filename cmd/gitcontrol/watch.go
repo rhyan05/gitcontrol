@@ -11,7 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/rhyan05/gerenciador-git/internal/git"
+	"github.com/rhyan05/gitcontrol/internal/git"
 )
 
 // Bloco 6 — refresh automático.
