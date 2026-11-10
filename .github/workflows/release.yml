@@ -21,7 +21,7 @@ jobs:
           - { goos: darwin, goarch: amd64 }
           - { goos: darwin, goarch: arm64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
@@ -44,7 +44,7 @@ jobs:
   desktop-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
@@ -68,7 +68,7 @@ jobs:
   desktop-linux:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
@@ -93,7 +93,7 @@ jobs:
   desktop-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
@@ -116,7 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [go-binaries]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
@@ -149,7 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [go-binaries, desktop-windows, desktop-linux, desktop-macos, pypi]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           path: dist
