@@ -13,6 +13,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/rhyan05/gitcontrol/internal/git"
+	"github.com/rhyan05/gitcontrol/internal/workspace"
 )
 
 // Índices dos painéis. A ordem aqui é a ordem em que eles aparecem na tela,
@@ -184,7 +185,7 @@ type diffMsg struct {
 //
 // WithAltScreen usa a tela alternativa: ao sair, o conteúdo anterior do
 // terminal volta intacto (nada de poluir o scrollback com frames da TUI).
-func run(repos []string) error {
+func run(repos []string, active int) error {
 	if len(repos) == 0 {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -192,8 +193,11 @@ func run(repos []string) error {
 		}
 		repos = []string{cwd}
 	}
+	if active < 0 || active >= len(repos) {
+		active = 0
+	}
 
-	repo := git.New(repos[0])
+	repo := git.New(repos[active])
 
 	// Watcher é opcional: se fsnotify falhar (permissão, .git exótico),
 	// seguimos só com o timer de fallback. O defer fecha ao sair da TUI.
@@ -206,7 +210,7 @@ func run(repos []string) error {
 
 	p := tea.NewProgram(
 		// Tamanho inicial de fallback; o WindowSizeMsg real chega logo depois.
-		model{repo: repo, repoPaths: repos, repoIndex: 0, watcher: watcher, width: 80, height: 24},
+		model{repo: repo, repoPaths: repos, repoIndex: active, watcher: watcher, width: 80, height: 24},
 		tea.WithAltScreen(),
 	)
 	_, err := p.Run()
@@ -593,6 +597,7 @@ func (m *model) switchRepo(delta int) tea.Cmd {
 
 	m.repoIndex = (m.repoIndex + delta + len(m.repoPaths)) % len(m.repoPaths)
 	m.repo = git.New(m.repoPaths[m.repoIndex])
+	_ = workspace.Save(workspace.Config{Repos: m.repoPaths, Active: m.repoIndex})
 	m.loaded = false
 	m.branches = nil
 	m.commits = nil

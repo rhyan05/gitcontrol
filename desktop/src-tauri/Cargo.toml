@@ -1,6 +1,6 @@
 [package]
 name = "gitcontrol"
-version = "0.1.1"
+version = "0.1.2"
 description = "Gerenciador Git com TUI, CLI JSON e desktop"
 authors = ["you"]
 edition = "2024"

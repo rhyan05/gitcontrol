@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- TUI persiste a lista de repositórios e o ativo em
+  `~/.config/gitcontrol/workspace.json` (ou `%AppData%` no Windows).
+- Release workflow publica as notas do CHANGELOG e anexa o wheel do PyPI.
+- CI valida o wheel também no macOS.
+- Dependabot, branch protection, templates de issue/PR, CONTRIBUTING e SECURITY.
+
 ## 0.1.1
 
 - CI do Rust compila o sidecar antes do `cargo check`.

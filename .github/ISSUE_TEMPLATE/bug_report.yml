@@ -1,0 +1,51 @@
+name: Bug report
+description: Reporte um comportamento incorreto
+labels: [bug]
+body:
+  - type: textarea
+    id: descricao
+    attributes:
+      label: Descrição
+      description: O que aconteceu e o que você esperava?
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Passos para reproduzir
+      placeholder: |
+        1. Abra ...
+        2. Execute ...
+        3. Veja ...
+    validations:
+      required: true
+  - type: input
+    id: versao
+    attributes:
+      label: Versão do gitcontrol
+      placeholder: "gitcontrol --version"
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - TUI
+        - CLI JSON
+        - Desktop
+    validations:
+      required: true
+  - type: input
+    id: sistema
+    attributes:
+      label: Sistema operacional
+      placeholder: Windows 11, Ubuntu 24.04, macOS 15...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / saída
+      description: Cole a saída do erro ou o JSON retornado.
+      render: shell

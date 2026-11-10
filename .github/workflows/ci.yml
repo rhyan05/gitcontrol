@@ -67,7 +67,34 @@ jobs:
       - run: python scripts/build_pypi.py
       - run: python -m build --wheel
       - run: python -m twine check dist/*.whl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-wheel
+          path: dist/*.whl
       - name: Smoke test do wheel
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install dist/*.whl
+          .venv/bin/gitcontrol --version
+          tmp="$(mktemp -d)"
+          git init -q "$tmp"
+          git -C "$tmp" config user.email test@test.com
+          git -C "$tmp" config user.name Test
+          .venv/bin/gitcontrol --json --repo "$tmp" status
+
+  pypi-macos:
+    runs-on: macos-latest
+    needs: [pypi]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pypi-wheel
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Smoke test do wheel no macOS
         run: |
           python -m venv .venv
           .venv/bin/pip install dist/*.whl

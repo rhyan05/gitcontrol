@@ -6,9 +6,10 @@ import (
 
 	"github.com/rhyan05/gitcontrol/internal/cli"
 	"github.com/rhyan05/gitcontrol/internal/git"
+	"github.com/rhyan05/gitcontrol/internal/workspace"
 )
 
-var version = "0.1.1"
+var version = "0.1.2"
 
 const usage = `uso:
   gitcontrol [--repo <path>] [repo...]        abre a TUI
@@ -62,7 +63,28 @@ parse:
 	if repoPath != "" {
 		repos = append([]string{repoPath}, repos...)
 	}
-	if err := run(repos); err != nil {
+
+	active := 0
+	if len(repos) > 0 {
+		cfg := workspace.Add(workspace.Config{}, repos...)
+		repos = cfg.Repos
+		_ = workspace.Save(cfg)
+	} else if cfg, err := workspace.Load(); err == nil && len(cfg.Repos) > 0 {
+		repos = cfg.Repos
+		active = cfg.Active
+	}
+
+	if len(repos) == 0 {
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gitcontrol: %v\n", err)
+			os.Exit(1)
+		}
+		repos = []string{cwd}
+		_ = workspace.Save(workspace.Config{Repos: repos})
+	}
+
+	if err := run(repos, active); err != nil {
 		fmt.Fprintf(os.Stderr, "gitcontrol: %v\n", err)
 		os.Exit(1)
 	}

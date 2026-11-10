@@ -571,6 +571,9 @@ func TestAbortWithoutOperationSetsNotice(t *testing.T) {
 }
 
 func TestSwitchRepoChangesActiveIndex(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	m := model{
 		repoPaths: []string{t.TempDir(), t.TempDir()},
 		repoIndex: 0,

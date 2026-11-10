@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitcontrol"
-version = "0.1.1"
+version = "0.1.2"
 description = "Gerenciador de Git com TUI, CLI JSON e app desktop"
 readme = "README.md"
 requires-python = ">=3.9"

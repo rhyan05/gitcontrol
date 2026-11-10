@@ -107,7 +107,8 @@ Teclas da TUI: `/` não se aplica; use `tab` para trocar de painel, `j/k` para
 mover, `enter` para checkout/diff, `d` para diff do arquivo, `s/u` para
 stage/unstage, `c` para commit, `M` merge, `C` cherry-pick, `f` fetch, `p` pull,
 `P` push, `a` abortar conflito, `x` continuar conflito, `e` editar arquivo em
-conflito e `[`/`]` para trocar de repositório.
+conflito e `[`/`]` para trocar de repositório. A TUI lembra os repositórios e o
+ativo em `~/.config/gitcontrol/workspace.json` (`%AppData%\gitcontrol` no Windows).
 
 ## Desktop
 
@@ -127,8 +128,8 @@ npm run tauri -- build
 
 Artefatos:
 
-- `desktop/src-tauri/target/release/bundle/msi/gitcontrol_0.1.1_x64_en-US.msi`
-- `desktop/src-tauri/target/release/bundle/nsis/gitcontrol_0.1.1_x64-setup.exe`
+- `desktop/src-tauri/target/release/bundle/msi/gitcontrol_0.1.2_x64_en-US.msi`
+- `desktop/src-tauri/target/release/bundle/nsis/gitcontrol_0.1.2_x64-setup.exe`
 
 Atalhos da GUI: `/` busca, `r` atualiza, `Ctrl/Cmd+K` abre a paleta de comandos,
 `Esc` fecha diálogos. O painel de diff é redimensionável pela alça acima dele.
