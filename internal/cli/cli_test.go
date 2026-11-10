@@ -166,6 +166,17 @@ func TestUsageErrors(t *testing.T) {
 		{"checkout"},
 		{"merge"},
 		{"cherry-pick"},
+		{"branch-create"},
+		{"branch-delete", "a", "b"},
+		{"branch-rename", "a"},
+		{"remote-add", "a"},
+		{"remote-remove"},
+		{"rebase"},
+		{"reset"},
+		{"stash-pop", "x"},
+		{"tag-create"},
+		{"tag-delete"},
+		{"discard"},
 		{"diff"},
 		{"fetch", "a", "b"},
 		{"pull", "a", "b", "c"},
@@ -402,5 +413,88 @@ func TestRemotesCLI(t *testing.T) {
 	}
 	if len(remotes) != 1 || remotes[0].Name != "origin" {
 		t.Errorf("remotes = %+v", remotes)
+	}
+}
+
+func TestBranchActionsCLI(t *testing.T) {
+	r, dir := newRepo(t)
+	writeAndCommit(t, dir, "a.txt", "v1", "primeiro")
+
+	resp, code := runCLI(t, r, "branch-create", "feature")
+	if code != 0 || !resp.OK {
+		t.Fatalf("branch-create: %+v", resp)
+	}
+	if resp, code = runCLI(t, r, "branch-rename", "feature", "feature-2"); code != 0 || !resp.OK {
+		t.Fatalf("branch-rename: %+v", resp)
+	}
+	if resp, code = runCLI(t, r, "branch-delete", "feature-2"); code != 0 || !resp.OK {
+		t.Fatalf("branch-delete: %+v", resp)
+	}
+}
+
+func TestStashCLI(t *testing.T) {
+	r, dir := newRepo(t)
+	writeAndCommit(t, dir, "a.txt", "v1", "primeiro")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("v2"), 0o644); err != nil {
+		t.Fatalf("escrever: %v", err)
+	}
+
+	if resp, code := runCLI(t, r, "stash", "wip"); code != 0 || !resp.OK {
+		t.Fatalf("stash: %+v", resp)
+	}
+
+	resp, code := runCLI(t, r, "stash-list")
+	if code != 0 || !resp.OK {
+		t.Fatalf("stash-list: %+v", resp)
+	}
+	var stashes []git.Stash
+	if err := json.Unmarshal(resp.Data, &stashes); err != nil {
+		t.Fatalf("decodificar stash: %v", err)
+	}
+	if len(stashes) != 1 {
+		t.Fatalf("stashes = %+v", stashes)
+	}
+
+	if resp, code = runCLI(t, r, "stash-pop", "0"); code != 0 || !resp.OK {
+		t.Fatalf("stash-pop: %+v", resp)
+	}
+}
+
+func TestTagsCLI(t *testing.T) {
+	r, dir := newRepo(t)
+	writeAndCommit(t, dir, "a.txt", "v1", "primeiro")
+
+	if resp, code := runCLI(t, r, "tag-create", "v1.0.0", "release"); code != 0 || !resp.OK {
+		t.Fatalf("tag-create: %+v", resp)
+	}
+	resp, code := runCLI(t, r, "tags")
+	if code != 0 || !resp.OK {
+		t.Fatalf("tags: %+v", resp)
+	}
+	var tags []git.Tag
+	if err := json.Unmarshal(resp.Data, &tags); err != nil {
+		t.Fatalf("decodificar tags: %v", err)
+	}
+	if len(tags) != 1 || tags[0].Name != "v1.0.0" {
+		t.Fatalf("tags = %+v", tags)
+	}
+	if resp, code = runCLI(t, r, "tag-delete", "v1.0.0"); code != 0 || !resp.OK {
+		t.Fatalf("tag-delete: %+v", resp)
+	}
+}
+
+func TestDiscardAmendResetCLI(t *testing.T) {
+	r, dir := newRepo(t)
+	writeAndCommit(t, dir, "a.txt", "v1", "primeiro")
+	writeAndCommit(t, dir, "a.txt", "v2", "segundo")
+
+	if resp, code := runCLI(t, r, "amend", "segundo amend"); code != 0 || !resp.OK {
+		t.Fatalf("amend: %+v", resp)
+	}
+	if resp, code := runCLI(t, r, "reset", "HEAD~1", "soft"); code != 0 || !resp.OK {
+		t.Fatalf("reset: %+v", resp)
+	}
+	if resp, code := runCLI(t, r, "discard", "a.txt"); code != 0 || !resp.OK {
+		t.Fatalf("discard: %+v", resp)
 	}
 }

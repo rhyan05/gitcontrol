@@ -126,6 +126,20 @@ func (r *Repo) Commit(ctx context.Context, message string) error {
 	return nil
 }
 
+// Amend reescreve o commit atual. Mensagem vazia mantém a original.
+func (r *Repo) Amend(ctx context.Context, message string) error {
+	args := []string{"commit", "--amend", "--no-edit"}
+	if message = strings.TrimSpace(message); message != "" {
+		args = []string{"commit", "--amend", "-m", message}
+	}
+
+	stdout, stderr, err := r.run(ctx, args...)
+	if err != nil {
+		return gitError("git commit --amend", stdout, stderr, err)
+	}
+	return nil
+}
+
 // Merge incorpora a branch informada na branch atual (git merge).
 //
 // --no-edit evita abrir editor para a mensagem do merge commit: a TUI roda

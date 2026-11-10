@@ -7,8 +7,11 @@ Interface Tauri + React do [gitcontrol](../README.md).
 ## Recursos
 
 - Branches, commits (com grafo), diff de commit e diff de arquivo do working tree.
-- Stage/unstage por arquivo e commit.
-- Fetch, pull e push pelo header ou pela paleta (`Ctrl/Cmd+K`).
+- Criar, renomear e deletar branches; rebase.
+- Stage/unstage, discard, commit e amend.
+- Fetch, pull, push e gerenciamento de remotos pela paleta (`Ctrl/Cmd+K`).
+- Stash (guardar/aplicar) e tags (criar).
+- Reset soft/mixed/hard.
 - Conflitos: abrir no editor, marcar como resolvido, continuar ou abortar.
 - Vários repositórios abertos, com troca pela barra de repos e lista persistida.
 

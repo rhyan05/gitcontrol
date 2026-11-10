@@ -14,6 +14,7 @@ const (
 	OperationNone       Operation = ""
 	OperationMerge      Operation = "merge"
 	OperationCherryPick Operation = "cherry-pick"
+	OperationRebase     Operation = "rebase"
 )
 
 // CurrentOperation descobre se existe merge/cherry-pick em andamento.
@@ -26,6 +27,12 @@ func (r *Repo) CurrentOperation(ctx context.Context) (Operation, error) {
 }
 
 func detectOperation(gitDir string) Operation {
+	for _, dir := range []string{"rebase-merge", "rebase-apply"} {
+		if info, err := os.Stat(filepath.Join(gitDir, dir)); err == nil && info.IsDir() {
+			return OperationRebase
+		}
+	}
+
 	for _, candidate := range []struct {
 		file string
 		op   Operation
@@ -57,6 +64,8 @@ func (r *Repo) Abort(ctx context.Context) error {
 		return r.runAction(ctx, "merge", "--abort")
 	case OperationCherryPick:
 		return r.runAction(ctx, "cherry-pick", "--abort")
+	case OperationRebase:
+		return r.runAction(ctx, "rebase", "--abort")
 	default:
 		return fmt.Errorf("nenhuma operação para abortar")
 	}
@@ -74,6 +83,8 @@ func (r *Repo) Continue(ctx context.Context) error {
 		return r.runAction(ctx, "commit", "--no-edit")
 	case OperationCherryPick:
 		return r.runAction(ctx, "cherry-pick", "--continue")
+	case OperationRebase:
+		return r.runAction(ctx, "rebase", "--continue")
 	default:
 		return fmt.Errorf("nenhuma operação para continuar")
 	}

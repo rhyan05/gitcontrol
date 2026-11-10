@@ -17,7 +17,7 @@ export type StatusResult = {
   upstream?: string;
   ahead?: number;
   behind?: number;
-  operation?: "merge" | "cherry-pick";
+  operation?: "merge" | "cherry-pick" | "rebase";
   files: FileStatus[];
 };
 

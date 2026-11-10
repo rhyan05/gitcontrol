@@ -42,7 +42,7 @@ export function StatusPanel({
   query: string;
   loading: boolean;
   busy: boolean;
-  operation?: "merge" | "cherry-pick";
+  operation?: "merge" | "cherry-pick" | "rebase";
   selectedFile: FileStatus | null;
   commitMessage: string;
   onCommitMessageChange: (value: string) => void;

@@ -35,6 +35,35 @@ func (r *Repo) Remotes(ctx context.Context) ([]Remote, error) {
 	return remotes, nil
 }
 
+// AddRemote adiciona um remoto.
+func (r *Repo) AddRemote(ctx context.Context, name, url string) error {
+	name = strings.TrimSpace(name)
+	url = strings.TrimSpace(url)
+	if name == "" || url == "" {
+		return fmt.Errorf("git remote add: nome e url são obrigatórios")
+	}
+
+	stdout, stderr, err := r.run(ctx, "remote", "add", name, url)
+	if err != nil {
+		return gitError("git remote add "+name, stdout, stderr, err)
+	}
+	return nil
+}
+
+// RemoveRemote remove um remoto.
+func (r *Repo) RemoveRemote(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("git remote remove: nome vazio")
+	}
+
+	stdout, stderr, err := r.run(ctx, "remote", "remove", name)
+	if err != nil {
+		return gitError("git remote remove "+name, stdout, stderr, err)
+	}
+	return nil
+}
+
 // Fetch atualiza as refs remotas. Sem remote, usa o padrão do branch atual.
 func (r *Repo) Fetch(ctx context.Context, remote string) error {
 	args := []string{"fetch", "--prune"}

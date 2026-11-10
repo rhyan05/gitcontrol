@@ -589,3 +589,44 @@ func TestSwitchRepoChangesActiveIndex(t *testing.T) {
 		t.Error("switchRepo deveria marcar loaded=false")
 	}
 }
+
+func TestInputPrompts(t *testing.T) {
+	tests := map[inputAction]string{
+		inputCreateBranch: "nova branch",
+		inputRenameBranch: "renomear",
+		inputStash:        "stash",
+		inputTag:          "tag",
+		inputAmend:        "amend",
+		inputRebase:       "rebase",
+		inputCommit:       "commit>",
+	}
+	for action, want := range tests {
+		m := model{inputAction: action, inputTarget: "main"}
+		if got := m.inputPrompt(); !strings.Contains(got, want) {
+			t.Errorf("prompt %v = %q, esperava conter %q", action, got, want)
+		}
+	}
+}
+
+func TestStartDeleteCurrentBranchBlocks(t *testing.T) {
+	m := model{
+		focus:    focusBranches,
+		branches: []git.Branch{{Name: "main", IsHead: true}},
+	}
+	m.startDeleteBranch()
+	if m.mode != modeNormal {
+		t.Errorf("mode = %v, esperava normal", m.mode)
+	}
+	if !strings.Contains(m.notice, "branch atual") {
+		t.Errorf("notice = %q", m.notice)
+	}
+}
+
+func TestStashKeyOpensInput(t *testing.T) {
+	m := model{}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	got := next.(model)
+	if got.mode != modeCommitInput || got.inputAction != inputStash {
+		t.Fatalf("mode=%v action=%v, esperava input de stash", got.mode, got.inputAction)
+	}
+}

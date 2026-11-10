@@ -32,6 +32,7 @@ import {
   type Command,
 } from "./features/command/CommandPalette";
 import { ConfirmDialog } from "./components/ui/ConfirmDialog";
+import { PromptDialog } from "./components/ui/PromptDialog";
 import { useToast } from "./components/ui/toast-context";
 import { useRepo } from "./hooks/useRepo";
 import "./App.css";
@@ -61,11 +62,26 @@ type Pending = {
     | "pull"
     | "push"
     | "abort"
-    | "continue";
+    | "continue"
+    | "branch-delete"
+    | "discard"
+    | "rebase"
+    | "reset-soft"
+    | "reset-mixed"
+    | "reset-hard";
   target: string;
   title: string;
   description: string;
   confirmLabel: string;
+};
+
+type Prompt = {
+  title: string;
+  description?: string;
+  placeholder?: string;
+  confirmLabel?: string;
+  allowEmpty?: boolean;
+  run: (value: string) => void;
 };
 
 function errorMessage(error: unknown): string {
@@ -113,6 +129,7 @@ function App() {
   const [commitMessage, setCommitMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [prompt, setPrompt] = useState<Prompt | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [diffHeight, setDiffHeight] = useState(initialDiffHeight);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -352,6 +369,169 @@ function App() {
     }
   }
 
+  const startDeleteBranch = useCallback(() => {
+    if (!selectedBranch || selectedBranch.head) return;
+    setPending({
+      action: "branch-delete",
+      target: selectedBranch.name,
+      title: `Deletar ${selectedBranch.name}?`,
+      description: "A branch local será removida. Commits não mergeados podem ser perdidos.",
+      confirmLabel: "Deletar",
+    });
+  }, [selectedBranch]);
+
+  const startDiscard = useCallback(() => {
+    if (!selectedFile) return;
+    setPending({
+      action: "discard",
+      target: selectedFile.path,
+      title: `Descartar ${selectedFile.path}?`,
+      description: "As mudanças locais desse arquivo serão perdidas.",
+      confirmLabel: "Descartar",
+    });
+  }, [selectedFile]);
+
+  const startReset = useCallback(
+    (mode: "soft" | "mixed" | "hard") => {
+      if (!selectedCommit) return;
+      setPending({
+        action: `reset-${mode}`,
+        target: selectedCommit.hash,
+        title: `Reset ${mode} para ${shortHash(selectedCommit.hash)}?`,
+        description:
+          mode === "hard"
+            ? "O working tree e o index serão descartados."
+            : "O HEAD será movido para o commit selecionado.",
+        confirmLabel: `Reset ${mode}`,
+      });
+    },
+    [selectedCommit],
+  );
+
+  const startRebase = useCallback(() => {
+    if (!selectedBranch || selectedBranch.name === status?.branch) return;
+    setPending({
+      action: "rebase",
+      target: selectedBranch.name,
+      title: `Rebase em ${selectedBranch.name}?`,
+      description: `${status?.branch ?? "HEAD"} será reaplicado sobre ${selectedBranch.name}.`,
+      confirmLabel: "Fazer rebase",
+    });
+  }, [selectedBranch, status?.branch]);
+
+  function stashPop() {
+    void runAction(["stash-pop"], "stash aplicado", false);
+  }
+
+  function promptCreateBranch() {
+    setPrompt({
+      title: "Nova branch",
+      description: "Informe o nome e, opcionalmente, o ponto de partida.",
+      placeholder: "feature origin/main",
+      confirmLabel: "Criar",
+      run: (value) => {
+        const [name, start] = value.split(/\s+/);
+        void runAction(
+          ["branch-create", name, ...(start ? [start] : [])],
+          `branch criada: ${name}`,
+        );
+      },
+    });
+  }
+
+  function promptRenameBranch() {
+    if (!selectedBranch) return;
+    setPrompt({
+      title: `Renomear ${selectedBranch.name}`,
+      placeholder: "novo-nome",
+      confirmLabel: "Renomear",
+      run: (value) => {
+        void runAction(
+          ["branch-rename", selectedBranch.name, value],
+          `branch renomeada: ${value}`,
+        );
+      },
+    });
+  }
+
+  function promptStash() {
+    setPrompt({
+      title: "Guardar stash",
+      description: "Mensagem opcional. Arquivos não rastreados também entram.",
+      placeholder: "wip",
+      confirmLabel: "Guardar",
+      allowEmpty: true,
+      run: (value) => {
+        void runAction(
+          value ? ["stash", "--untracked", value] : ["stash", "--untracked"],
+          "stash criado",
+          false,
+        );
+      },
+    });
+  }
+
+  function promptTag() {
+    setPrompt({
+      title: "Criar tag",
+      description: "Informe o nome e, opcionalmente, uma mensagem para tag anotada.",
+      placeholder: "v1.0.0 release",
+      confirmLabel: "Criar tag",
+      run: (value) => {
+        const fields = value.split(/\s+/);
+        void runAction(
+          ["tag-create", fields[0], ...fields.slice(1)],
+          `tag criada: ${fields[0]}`,
+        );
+      },
+    });
+  }
+
+  function promptAmend() {
+    setPrompt({
+      title: "Amend do commit atual",
+      description: "Deixe vazio para manter a mensagem original.",
+      placeholder: "nova mensagem",
+      confirmLabel: "Amend",
+      allowEmpty: true,
+      run: (value) => {
+        void runAction(
+          value ? ["amend", value] : ["amend"],
+          "commit amendado",
+        );
+      },
+    });
+  }
+
+  function promptRemoteAdd() {
+    setPrompt({
+      title: "Adicionar remoto",
+      description: "Formato: nome url",
+      placeholder: "origin https://github.com/user/repo.git",
+      confirmLabel: "Adicionar",
+      run: (value) => {
+        const [name, ...rest] = value.split(/\s+/);
+        const url = rest.join(" ");
+        if (!name || !url) {
+          toast.error("informe nome e url");
+          return;
+        }
+        void runAction(["remote-add", name, url], `remoto: ${name}`);
+      },
+    });
+  }
+
+  function promptRemoteRemove() {
+    setPrompt({
+      title: "Remover remoto",
+      placeholder: "origin",
+      confirmLabel: "Remover",
+      run: (value) => {
+        void runAction(["remote-remove", value], `remoto removido: ${value}`);
+      },
+    });
+  }
+
   async function commit() {
     const message = commitMessage.trim();
     if (!message) return;
@@ -363,8 +543,15 @@ function App() {
   async function executePending() {
     if (!pending) return;
 
-    const single = ["pull", "push", "abort", "continue"].includes(pending.action);
-    const args = single ? [pending.action] : [pending.action, pending.target];
+    let args: string[];
+    if (["pull", "push", "abort", "continue"].includes(pending.action)) {
+      args = [pending.action];
+    } else if (pending.action.startsWith("reset-")) {
+      args = ["reset", pending.target, pending.action.slice("reset-".length)];
+    } else {
+      args = [pending.action, pending.target];
+    }
+
     const label = pending.target
       ? `${pending.action}: ${pending.target}`
       : pending.action;
@@ -526,7 +713,85 @@ function App() {
             },
           ]
         : []),
+      {
+        id: "discard-file",
+        label: `Descartar ${selectedFile.path}`,
+        icon: <Minus size={14} />,
+        run: startDiscard,
+      },
     );
+  }
+
+  commands.push(
+    {
+      id: "branch-create",
+      label: "Nova branch",
+      icon: <Plus size={14} />,
+      run: promptCreateBranch,
+    },
+    {
+      id: "stash",
+      label: "Guardar stash",
+      icon: <Download size={14} />,
+      run: promptStash,
+    },
+    {
+      id: "stash-pop",
+      label: "Aplicar stash mais recente",
+      icon: <Upload size={14} />,
+      run: stashPop,
+    },
+    {
+      id: "tag-create",
+      label: "Criar tag",
+      icon: <Plus size={14} />,
+      run: promptTag,
+    },
+    {
+      id: "amend",
+      label: "Amend do commit atual",
+      icon: <FilePenLine size={14} />,
+      run: promptAmend,
+    },
+    {
+      id: "remote-add",
+      label: "Adicionar remoto",
+      icon: <Upload size={14} />,
+      run: promptRemoteAdd,
+    },
+    {
+      id: "remote-remove",
+      label: "Remover remoto",
+      icon: <Minus size={14} />,
+      run: promptRemoteRemove,
+    },
+  );
+
+  if (selectedBranch) {
+    commands.push({
+      id: "branch-rename",
+      label: `Renomear ${selectedBranch.name}`,
+      icon: <FilePenLine size={14} />,
+      run: promptRenameBranch,
+    });
+
+    if (!selectedBranch.head) {
+      commands.push({
+        id: "branch-delete",
+        label: `Deletar ${selectedBranch.name}`,
+        icon: <Minus size={14} />,
+        run: startDeleteBranch,
+      });
+    }
+
+    if (selectedBranch.name !== status?.branch) {
+      commands.push({
+        id: "rebase",
+        label: `Rebase em ${selectedBranch.name}`,
+        icon: <GitMerge size={14} />,
+        run: startRebase,
+      });
+    }
   }
 
   if (selectedBranch && !selectedBranch.head) {
@@ -576,6 +841,26 @@ function App() {
           confirmLabel: "Aplicar commit",
         }),
     });
+    commands.push(
+      {
+        id: "reset-soft",
+        label: `Reset soft para ${shortHash(selectedCommit.hash)}`,
+        icon: <RefreshCw size={14} />,
+        run: () => startReset("soft"),
+      },
+      {
+        id: "reset-mixed",
+        label: `Reset mixed para ${shortHash(selectedCommit.hash)}`,
+        icon: <RefreshCw size={14} />,
+        run: () => startReset("mixed"),
+      },
+      {
+        id: "reset-hard",
+        label: `Reset hard para ${shortHash(selectedCommit.hash)}`,
+        icon: <Minus size={14} />,
+        run: () => startReset("hard"),
+      },
+    );
   }
 
   if (stageAllPaths.length > 0) {
@@ -776,6 +1061,23 @@ function App() {
         onConfirm={() => void executePending()}
         onClose={() => {
           if (!busy) setPending(null);
+        }}
+      />
+
+      <PromptDialog
+        open={prompt !== null}
+        title={prompt?.title ?? ""}
+        description={prompt?.description}
+        placeholder={prompt?.placeholder}
+        confirmLabel={prompt?.confirmLabel}
+        allowEmpty={prompt?.allowEmpty}
+        busy={busy}
+        onSubmit={(value) => {
+          prompt?.run(value);
+          setPrompt(null);
+        }}
+        onClose={() => {
+          if (!busy) setPrompt(null);
         }}
       />
 

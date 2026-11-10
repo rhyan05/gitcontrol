@@ -193,6 +193,62 @@ describe("App", () => {
     });
   });
 
+  it("cria branch pela paleta com prompt", async () => {
+    const user = userEvent.setup();
+    mockRepo(statusWith());
+    renderApp();
+
+    await user.keyboard("{Control>}k{/Control}");
+    await user.type(
+      await screen.findByLabelText("Buscar comando"),
+      "Nova branch",
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /Nova branch/i }),
+    );
+
+    await user.type(
+      await screen.findByRole("textbox", { name: "Nova branch" }),
+      "feature",
+    );
+    await user.click(screen.getByRole("button", { name: "Criar" }));
+
+    await waitFor(() => {
+      expect(runMock).toHaveBeenCalledWith(
+        expect.any(String),
+        "branch-create",
+        "feature",
+      );
+    });
+  });
+
+  it("descarta arquivo selecionado com confirmação", async () => {
+    const user = userEvent.setup();
+    mockRepo(statusWith());
+    renderApp();
+
+    await user.click(
+      await screen.findByRole("button", { name: "src/App.tsx" }),
+    );
+    await user.keyboard("{Control>}k{/Control}");
+    await user.type(
+      await screen.findByLabelText("Buscar comando"),
+      "Descartar src/App.tsx",
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /Descartar src\/App\.tsx/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Descartar" }));
+
+    await waitFor(() => {
+      expect(runMock).toHaveBeenCalledWith(
+        expect.any(String),
+        "discard",
+        "src/App.tsx",
+      );
+    });
+  });
+
   it("filtra os painéis pela busca", async () => {
     const user = userEvent.setup();
     mockRepo(statusWith());

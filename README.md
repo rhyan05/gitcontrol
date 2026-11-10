@@ -14,12 +14,17 @@ Gerenciador de Git com três interfaces sobre o mesmo core:
 
 ## O que funciona
 
-- Branches: listar, checkout (local e remota com tracking), merge.
-- Commits: log, grafo ASCII, diff completo, cherry-pick.
-- Working tree: status, diff de arquivo, stage/unstage por arquivo, commit.
-- Remotos: fetch, pull e push (com upstream automático no primeiro push).
-- Conflitos: marcar resolvido, abortar e continuar merge/cherry-pick; edição no
-  editor do sistema/TUI.
+- Branches: listar, criar, deletar, renomear, checkout (local e remota com
+  tracking), merge e rebase.
+- Commits: log, grafo ASCII, diff completo, cherry-pick e amend.
+- Working tree: status, diff de arquivo, stage/unstage, discard e commit.
+- Remotos: listar, adicionar, remover, fetch, pull e push (com upstream
+  automático no primeiro push).
+- Stash: guardar, listar, aplicar, pop e drop.
+- Tags: listar, criar (leve ou anotada) e deletar.
+- Conflitos: marcar resolvido, abortar e continuar merge/cherry-pick/rebase;
+  edição no editor do sistema/TUI.
+- Reset: soft, mixed e hard.
 - Multi-repo: vários repositórios abertos com troca de ativo.
 - Refresh automático na TUI (fsnotify + timer) e na GUI (polling curto).
 - Instaladores Windows: `.msi` e `.exe` (NSIS).
@@ -77,21 +82,38 @@ go run ./cmd/gitcontrol --json --repo . status
 go run ./cmd/gitcontrol --json log
 go run ./cmd/gitcontrol --json graph
 go run ./cmd/gitcontrol --json branches
+go run ./cmd/gitcontrol --json branch-create <name> [start]
+go run ./cmd/gitcontrol --json branch-delete <name> [--force]
+go run ./cmd/gitcontrol --json branch-rename <old> <new>
 go run ./cmd/gitcontrol --json show <hash>
 go run ./cmd/gitcontrol --json diff <path>
 go run ./cmd/gitcontrol --json remotes
+go run ./cmd/gitcontrol --json remote-add <name> <url>
+go run ./cmd/gitcontrol --json remote-remove <name>
 go run ./cmd/gitcontrol --json fetch [remote]
 go run ./cmd/gitcontrol --json pull [remote] [branch]
 go run ./cmd/gitcontrol --json push [remote] [branch]
 go run ./cmd/gitcontrol --json checkout <branch>
 go run ./cmd/gitcontrol --json merge <branch>
 go run ./cmd/gitcontrol --json cherry-pick <hash>
+go run ./cmd/gitcontrol --json rebase <upstream>
 go run ./cmd/gitcontrol --json resolve <path...>
 go run ./cmd/gitcontrol --json abort
 go run ./cmd/gitcontrol --json continue
 go run ./cmd/gitcontrol --json stage <path...>
 go run ./cmd/gitcontrol --json unstage <path...>
+go run ./cmd/gitcontrol --json discard <path...>
 go run ./cmd/gitcontrol --json commit "mensagem"
+go run ./cmd/gitcontrol --json amend ["mensagem"]
+go run ./cmd/gitcontrol --json reset <rev> [soft|mixed|hard]
+go run ./cmd/gitcontrol --json stash [--untracked] [mensagem]
+go run ./cmd/gitcontrol --json stash-list
+go run ./cmd/gitcontrol --json stash-pop [index]
+go run ./cmd/gitcontrol --json stash-apply [index]
+go run ./cmd/gitcontrol --json stash-drop [index]
+go run ./cmd/gitcontrol --json tags
+go run ./cmd/gitcontrol --json tag-create <name> [mensagem]
+go run ./cmd/gitcontrol --json tag-delete <name>
 ```
 
 O contrato é sempre um objeto JSON:
@@ -103,12 +125,14 @@ O contrato é sempre um objeto JSON:
 
 Exit code `0` em sucesso e `1` em erro.
 
-Teclas da TUI: `/` não se aplica; use `tab` para trocar de painel, `j/k` para
-mover, `enter` para checkout/diff, `d` para diff do arquivo, `s/u` para
-stage/unstage, `c` para commit, `M` merge, `C` cherry-pick, `f` fetch, `p` pull,
-`P` push, `a` abortar conflito, `x` continuar conflito, `e` editar arquivo em
-conflito e `[`/`]` para trocar de repositório. A TUI lembra os repositórios e o
-ativo em `~/.config/gitcontrol/workspace.json` (`%AppData%\gitcontrol` no Windows).
+Teclas da TUI: `tab` troca de painel, `j/k` move, `enter` faz checkout/diff,
+`d` abre o diff do arquivo, `s/u` faz stage/unstage, `c` commit, `M` merge,
+`C` cherry-pick, `f` fetch, `p` pull, `P` push, `a` abortar conflito, `x`
+continuar conflito, `e` editar arquivo em conflito, `n` nova branch, `R`
+renomear, `D` deletar branch, `r` rebase, `z` stash, `Z` stash pop, `t` tag,
+`A` amend, `X` discard e `[`/`]` para trocar de repositório. A TUI lembra os
+repositórios e o ativo em `~/.config/gitcontrol/workspace.json`
+(`%AppData%\gitcontrol` no Windows).
 
 ## Desktop
 
@@ -128,8 +152,8 @@ npm run tauri -- build
 
 Artefatos:
 
-- `desktop/src-tauri/target/release/bundle/msi/gitcontrol_0.1.2_x64_en-US.msi`
-- `desktop/src-tauri/target/release/bundle/nsis/gitcontrol_0.1.2_x64-setup.exe`
+- `desktop/src-tauri/target/release/bundle/msi/gitcontrol_0.1.3_x64_en-US.msi`
+- `desktop/src-tauri/target/release/bundle/nsis/gitcontrol_0.1.3_x64-setup.exe`
 
 Atalhos da GUI: `/` busca, `r` atualiza, `Ctrl/Cmd+K` abre a paleta de comandos,
 `Esc` fecha diálogos. O painel de diff é redimensionável pela alça acima dele.

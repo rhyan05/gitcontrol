@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.3
+
+- Branches: criar, deletar e renomear na TUI, desktop e CLI.
+- Rebase na TUI, desktop e CLI, com abort/continue usando o fluxo de conflitos.
+- Stash: guardar, listar, aplicar, pop e drop.
+- Tags: listar, criar (leve/anotada) e deletar.
+- Reset soft/mixed/hard e discard de arquivos.
+- Amend de commit.
+- Remotos: adicionar e remover.
+- TUI ganhou atalhos e prompts para branch, stash, tag, amend, rebase e discard.
+
 ## 0.1.2
 
 - TUI persiste a lista de repositórios e o ativo em

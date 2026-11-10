@@ -9,7 +9,7 @@ import (
 	"github.com/rhyan05/gitcontrol/internal/workspace"
 )
 
-var version = "0.1.2"
+var version = "0.1.3"
 
 const usage = `uso:
   gitcontrol [--repo <path>] [repo...]        abre a TUI

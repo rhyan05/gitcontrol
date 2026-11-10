@@ -35,6 +35,19 @@ const (
 	modeCommitInput
 )
 
+// inputAction diz o que fazer com o texto digitado no input.
+type inputAction int
+
+const (
+	inputCommit inputAction = iota
+	inputCreateBranch
+	inputRenameBranch
+	inputStash
+	inputTag
+	inputAmend
+	inputRebase
+)
+
 // confirmAction lembra qual ação o usuário confirmou com y.
 type confirmAction int
 
@@ -46,6 +59,9 @@ const (
 	actionPush
 	actionAbort
 	actionContinue
+	actionDeleteBranch
+	actionDiscard
+	actionRebase
 )
 
 // Estilos estáticos da TUI.
@@ -145,6 +161,8 @@ type model struct {
 	pendingAction confirmAction
 	pendingTarget string // branch ou hash da ação confirmada
 	pendingRemote bool
+	inputAction   inputAction
+	inputTarget   string
 	commitText    string
 	notice        string
 
@@ -312,6 +330,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "C":
 			// Cherry-pick do commit selecionado (com confirmação).
 			m.startCherryPick()
+		case "n":
+			m.startInput(inputCreateBranch)
+		case "R":
+			m.startRenameInput()
+		case "D":
+			m.startDeleteBranch()
+		case "r":
+			m.startRebase()
+		case "z":
+			m.startInput(inputStash)
+		case "Z":
+			return m, m.stashPop()
+		case "t":
+			m.startInput(inputTag)
+		case "A":
+			m.startInput(inputAmend)
+		case "X":
+			m.startDiscard()
 		case "f":
 			// Fetch é read-only: roda direto, sem confirmação.
 			return m, m.fetch()
@@ -428,7 +464,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateCommitInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
-		return m, m.submitCommit()
+		return m, m.submitInput()
 	case tea.KeyEsc:
 		m.mode = modeNormal
 		m.commitText = ""
@@ -616,6 +652,83 @@ func (m *model) switchRepo(delta int) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// startInput abre o input de texto para a ação informada.
+func (m *model) startInput(action inputAction) {
+	m.mode = modeCommitInput
+	m.inputAction = action
+	m.inputTarget = ""
+	m.commitText = ""
+	m.notice = ""
+}
+
+// startRenameInput renomeia a branch selecionada (ou a atual).
+func (m *model) startRenameInput() {
+	old := m.currentBranch()
+	if m.focus == focusBranches && len(m.branches) > 0 {
+		old = m.branches[m.cursor[focusBranches]].Name
+	}
+	m.startInput(inputRenameBranch)
+	m.inputTarget = old
+}
+
+// startDeleteBranch arma a remoção da branch selecionada.
+func (m *model) startDeleteBranch() {
+	if m.focus != focusBranches || len(m.branches) == 0 {
+		return
+	}
+	branch := m.branches[m.cursor[focusBranches]]
+	if branch.IsHead {
+		m.notice = "não dá para deletar a branch atual"
+		return
+	}
+	m.mode = modeConfirm
+	m.pendingAction = actionDeleteBranch
+	m.pendingTarget = branch.Name
+	m.notice = ""
+}
+
+// startRebase arma o rebase da branch atual sobre a selecionada.
+func (m *model) startRebase() {
+	if m.focus != focusBranches || len(m.branches) == 0 {
+		return
+	}
+	branch := m.branches[m.cursor[focusBranches]]
+	if branch.Name == m.currentBranch() {
+		m.notice = "escolha outra branch para rebase"
+		return
+	}
+	m.mode = modeConfirm
+	m.pendingAction = actionRebase
+	m.pendingTarget = branch.Name
+	m.notice = ""
+}
+
+// startDiscard arma o descarte do arquivo selecionado.
+func (m *model) startDiscard() {
+	if m.focus != focusStatus {
+		return
+	}
+	files := m.visibleStatus()
+	if len(files) == 0 {
+		return
+	}
+	m.mode = modeConfirm
+	m.pendingAction = actionDiscard
+	m.pendingTarget = files[m.cursor[focusStatus]].Path
+	m.notice = ""
+}
+
+// stashPop aplica o stash mais recente sem confirmação.
+func (m *model) stashPop() tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		if err := repo.StashPop(context.Background(), 0); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{notice: "stash aplicado"}
+	}
+}
+
 // runConfirmed executa a ação que estava aguardando y.
 // O I/O acontece na closure; Update apenas lê o resultado via actionMsg.
 func (m *model) runConfirmed() tea.Cmd {
@@ -653,6 +766,15 @@ func (m *model) runConfirmed() tea.Cmd {
 		case actionContinue:
 			err = repo.Continue(context.Background())
 			notice = "operação concluída"
+		case actionDeleteBranch:
+			err = repo.DeleteBranch(context.Background(), target, false)
+			notice = "branch removida: " + target
+		case actionDiscard:
+			err = repo.Discard(context.Background(), []string{target})
+			notice = "descartado: " + target
+		case actionRebase:
+			err = repo.Rebase(context.Background(), target)
+			notice = "rebase em " + target
 		}
 
 		if err != nil {
@@ -700,24 +822,65 @@ func (m *model) fileAction(stage bool) tea.Cmd {
 	}
 }
 
-// submitCommit valida a mensagem e devolve o cmd que cria o commit.
-// Mensagem vazia mantém o input aberto e avisa no rodapé.
-func (m *model) submitCommit() tea.Cmd {
-	message := strings.TrimSpace(m.commitText)
-	if message == "" {
-		m.notice = "mensagem de commit vazia"
+// submitInput valida e despacha o texto do input conforme a ação.
+func (m *model) submitInput() tea.Cmd {
+	text := strings.TrimSpace(m.commitText)
+	action := m.inputAction
+	target := m.inputTarget
+
+	if text == "" && action != inputStash && action != inputAmend {
+		if action == inputCommit {
+			m.notice = "mensagem de commit vazia"
+		} else {
+			m.notice = "texto vazio"
+		}
 		return nil
 	}
 
 	m.mode = modeNormal
 	m.commitText = ""
+	m.inputTarget = ""
 	repo := m.repo
 
 	return func() tea.Msg {
-		if err := repo.Commit(context.Background(), message); err != nil {
+		ctx := context.Background()
+		var err error
+		notice := ""
+
+		switch action {
+		case inputCommit:
+			err = repo.Commit(ctx, text)
+			notice = "commit: " + text
+		case inputCreateBranch:
+			fields := strings.Fields(text)
+			start := ""
+			if len(fields) > 1 {
+				start = fields[1]
+			}
+			err = repo.CreateBranch(ctx, fields[0], start)
+			notice = "branch criada: " + fields[0]
+		case inputRenameBranch:
+			err = repo.RenameBranch(ctx, target, text)
+			notice = "branch renomeada: " + text
+		case inputStash:
+			err = repo.StashPush(ctx, text, true)
+			notice = "stash criado"
+		case inputTag:
+			fields := strings.Fields(text)
+			err = repo.CreateTag(ctx, fields[0], strings.Join(fields[1:], " "))
+			notice = "tag criada: " + fields[0]
+		case inputAmend:
+			err = repo.Amend(ctx, text)
+			notice = "commit amendado"
+		case inputRebase:
+			err = repo.Rebase(ctx, text)
+			notice = "rebase em " + text
+		}
+
+		if err != nil {
 			return actionMsg{err: err}
 		}
-		return actionMsg{notice: "commit: " + message}
+		return actionMsg{notice: notice}
 	}
 }
 
@@ -806,7 +969,7 @@ func (m model) footerText() string {
 
 	switch m.mode {
 	case modeCommitInput:
-		text = fmt.Sprintf("commit> %s │ enter commitar │ esc cancelar", m.commitText)
+		text = fmt.Sprintf("%s%s │ enter confirmar │ esc cancelar", m.inputPrompt(), m.commitText)
 	case modeConfirm:
 		switch m.pendingAction {
 		case actionCheckout:
@@ -826,12 +989,18 @@ func (m model) footerText() string {
 			text = "abortar " + m.pendingTarget + "?"
 		case actionContinue:
 			text = "continuar " + m.pendingTarget + "?"
+		case actionDeleteBranch:
+			text = "deletar branch " + m.pendingTarget + "?"
+		case actionDiscard:
+			text = "descartar " + m.pendingTarget + "?"
+		case actionRebase:
+			text = "rebase em " + m.pendingTarget + "?"
 		}
 		text += " (y/n)"
 	default:
 		// Ordem proposital: ações antes das teclas de navegação, para não
 		// serem cortadas em terminal de 80 colunas.
-		text = "q sair │ tab │ j/k │ M merge │ C cherry-pick │ f fetch │ p pull │ P push │ a/x conflito │ enter │ d diff │ s/u stage │ c commit"
+		text = "q sair │ tab │ j/k │ n branch │ R renomear │ D deletar │ r rebase │ z/Z stash │ t tag │ A amend │ X discard │ M merge │ C cherry-pick │ f fetch │ p pull │ P push │ a/x conflito │ enter │ d diff │ s/u stage │ c commit"
 		if m.diffOpen {
 			text = "esc fechar │ pgup/pgdn scroll │ home/end topo/fim │ q sair"
 		}
@@ -844,6 +1013,26 @@ func (m model) footerText() string {
 		text = m.notice + " │ " + text
 	}
 	return text
+}
+
+// inputPrompt devolve o rótulo do input atual.
+func (m model) inputPrompt() string {
+	switch m.inputAction {
+	case inputCreateBranch:
+		return "nova branch (nome [start])> "
+	case inputRenameBranch:
+		return "renomear " + m.inputTarget + " para> "
+	case inputStash:
+		return "stash (mensagem opcional)> "
+	case inputTag:
+		return "tag (nome [mensagem])> "
+	case inputAmend:
+		return "amend (vazio mantém a mensagem)> "
+	case inputRebase:
+		return "rebase em> "
+	default:
+		return "commit> "
+	}
 }
 
 // currentBranch é o alvo do merge/cherry-pick exibido na confirmação.

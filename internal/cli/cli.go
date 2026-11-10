@@ -14,12 +14,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/rhyan05/gitcontrol/internal/git"
 )
 
-const usage = "uso: gitcontrol --json <status|log|graph|branches|show|diff|remotes|fetch|pull|push|checkout|merge|cherry-pick|resolve|abort|continue|stage|unstage|commit>"
+const usage = "uso: gitcontrol --json <status|log|graph|branches|branch-create|branch-delete|branch-rename|show|diff|remotes|remote-add|remote-remove|fetch|pull|push|checkout|merge|cherry-pick|rebase|resolve|abort|continue|stage|unstage|discard|commit|amend|reset|stash|stash-list|stash-pop|stash-apply|stash-drop|tags|tag-create|tag-delete>"
 
 // success e failure são structs separados para o JSON de sucesso sempre ter
 // "data" (mesmo que null) e o de erro sempre ter "error".
@@ -101,6 +102,43 @@ func Run(repo *git.Repo, args []string, out io.Writer) int {
 		}
 		return ok(out, branches)
 
+	case "branch-create":
+		if len(rest) < 1 || len(rest) > 2 {
+			return fail(out, "usage", "uso: gitcontrol --json branch-create <name> [start]")
+		}
+		start := ""
+		if len(rest) == 2 {
+			start = rest[1]
+		}
+		if err := repo.CreateBranch(ctx, rest[0], start); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "branch-delete":
+		force := false
+		args := rest
+		if len(args) > 0 && args[0] == "--force" {
+			force = true
+			args = args[1:]
+		}
+		if len(args) != 1 {
+			return fail(out, "usage", "uso: gitcontrol --json branch-delete <name> [--force]")
+		}
+		if err := repo.DeleteBranch(ctx, args[0], force); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "branch-rename":
+		if len(rest) != 2 {
+			return fail(out, "usage", "uso: gitcontrol --json branch-rename <old> <new>")
+		}
+		if err := repo.RenameBranch(ctx, rest[0], rest[1]); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
 	case "show":
 		if len(rest) != 1 {
 			return fail(out, "usage", "uso: gitcontrol --json show <hash>")
@@ -130,6 +168,24 @@ func Run(repo *git.Repo, args []string, out io.Writer) int {
 			return failGit(out, err)
 		}
 		return ok(out, remotes)
+
+	case "remote-add":
+		if len(rest) != 2 {
+			return fail(out, "usage", "uso: gitcontrol --json remote-add <name> <url>")
+		}
+		if err := repo.AddRemote(ctx, rest[0], rest[1]); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "remote-remove":
+		if len(rest) != 1 {
+			return fail(out, "usage", "uso: gitcontrol --json remote-remove <name>")
+		}
+		if err := repo.RemoveRemote(ctx, rest[0]); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
 
 	case "fetch":
 		if len(rest) > 1 {
@@ -203,6 +259,15 @@ func Run(repo *git.Repo, args []string, out io.Writer) int {
 		}
 		return ok(out, nil)
 
+	case "rebase":
+		if len(rest) != 1 {
+			return fail(out, "usage", "uso: gitcontrol --json rebase <upstream>")
+		}
+		if err := repo.Rebase(ctx, rest[0]); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
 	case "resolve":
 		if len(rest) == 0 {
 			return fail(out, "usage", "uso: gitcontrol --json resolve <path...>")
@@ -248,6 +313,15 @@ func Run(repo *git.Repo, args []string, out io.Writer) int {
 		}
 		return ok(out, nil)
 
+	case "discard":
+		if len(rest) == 0 {
+			return fail(out, "usage", "uso: gitcontrol --json discard <path...>")
+		}
+		if err := repo.Discard(ctx, rest); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
 	case "commit":
 		if len(rest) == 0 {
 			return fail(out, "usage", "uso: gitcontrol --json commit <mensagem...>")
@@ -258,9 +332,111 @@ func Run(repo *git.Repo, args []string, out io.Writer) int {
 		}
 		return ok(out, nil)
 
+	case "amend":
+		if err := repo.Amend(ctx, strings.Join(rest, " ")); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "reset":
+		if len(rest) < 1 || len(rest) > 2 {
+			return fail(out, "usage", "uso: gitcontrol --json reset <rev> [soft|mixed|hard]")
+		}
+		mode := ""
+		if len(rest) == 2 {
+			mode = rest[1]
+		}
+		if err := repo.Reset(ctx, rest[0], mode); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "stash":
+		args := rest
+		includeUntracked := false
+		if len(args) > 0 && (args[0] == "--untracked" || args[0] == "-u") {
+			includeUntracked = true
+			args = args[1:]
+		}
+		if err := repo.StashPush(ctx, strings.Join(args, " "), includeUntracked); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "stash-list":
+		if len(rest) != 0 {
+			return fail(out, "usage", "stash-list não aceita argumentos")
+		}
+		stashes, err := repo.StashList(ctx)
+		if err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, stashes)
+
+	case "stash-pop", "stash-apply", "stash-drop":
+		index, err := parseStashIndex(rest)
+		if err != nil {
+			return fail(out, "usage", "uso: gitcontrol --json "+cmd+" [index]")
+		}
+		switch cmd {
+		case "stash-pop":
+			err = repo.StashPop(ctx, index)
+		case "stash-apply":
+			err = repo.StashApply(ctx, index)
+		default:
+			err = repo.StashDrop(ctx, index)
+		}
+		if err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "tags":
+		if len(rest) != 0 {
+			return fail(out, "usage", "tags não aceita argumentos")
+		}
+		tags, err := repo.Tags(ctx)
+		if err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, tags)
+
+	case "tag-create":
+		if len(rest) == 0 {
+			return fail(out, "usage", "uso: gitcontrol --json tag-create <name> [message...]")
+		}
+		if err := repo.CreateTag(ctx, rest[0], strings.Join(rest[1:], " ")); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
+	case "tag-delete":
+		if len(rest) != 1 {
+			return fail(out, "usage", "uso: gitcontrol --json tag-delete <name>")
+		}
+		if err := repo.DeleteTag(ctx, rest[0]); err != nil {
+			return failGit(out, err)
+		}
+		return ok(out, nil)
+
 	default:
 		return fail(out, "usage", fmt.Sprintf("comando desconhecido: %s", cmd))
 	}
+}
+
+// parseStashIndex lê um índice opcional (default 0).
+func parseStashIndex(args []string) (int, error) {
+	if len(args) == 0 {
+		return 0, nil
+	}
+	if len(args) != 1 {
+		return 0, fmt.Errorf("índice de stash inválido")
+	}
+	index, err := strconv.Atoi(args[0])
+	if err != nil || index < 0 {
+		return 0, fmt.Errorf("índice de stash inválido: %q", args[0])
+	}
+	return index, nil
 }
 
 // ok escreve o envelope de sucesso. data pode ser nil (data:null).
