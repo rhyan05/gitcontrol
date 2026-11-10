@@ -31,7 +31,7 @@ try {
     python -m twine check dist/*.whl
     if ($LASTEXITCODE -ne 0) { throw "twine check falhou" }
 
-    python -m twine upload --non-interactive --repository pypi dist/*.whl
+    python -m twine upload --non-interactive dist/*.whl
     if ($LASTEXITCODE -ne 0) { throw "twine upload falhou" }
 } finally {
     Pop-Location

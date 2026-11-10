@@ -80,7 +80,16 @@ jobs:
       - run: VERSION="${GITHUB_REF_NAME#v}" python scripts/build_pypi.py
       - run: python -m build --wheel
       - run: python -m twine check dist/*.whl
+      - id: pypi_exists
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if curl -fsS "https://pypi.org/pypi/gitcontrol/${VERSION}/json" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: pypa/gh-action-pypi-publish@release/v1
+        if: steps.pypi_exists.outputs.exists == 'false'
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist
