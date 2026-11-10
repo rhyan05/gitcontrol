@@ -20,7 +20,13 @@ Gerenciador de Git com três interfaces sobre o mesmo core:
 
 ![Paleta de comandos](docs/screenshots/desktop-palette.png)
 
-> Capturas do desktop geradas com um repositório de demonstração.
+### TUI
+
+![TUI principal](docs/screenshots/tui-main.png)
+
+![TUI com painel de diff](docs/screenshots/tui-diff.png)
+
+> Capturas geradas com um repositório de demonstração.
 
 ### CLI JSON
 
