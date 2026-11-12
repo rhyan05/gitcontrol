@@ -171,7 +171,7 @@ jobs:
               match.group(0).strip() + "\n", encoding="utf-8"
           )
           PY
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           body_path: release-notes.md
           files: dist/**/*
