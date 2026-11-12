@@ -2,7 +2,7 @@
 
 Interface Tauri + React do [gitcontrol](../README.md).
 
-![Interface](docs/gitcontrol.png)
+![Interface](../docs/screenshots/desktop-main.png)
 
 ## Recursos
 
