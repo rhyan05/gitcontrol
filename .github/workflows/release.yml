@@ -36,7 +36,7 @@ jobs:
             go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
             -o "dist/gitcontrol_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}${EXT}" \
             ./cmd/gitcontrol
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gitcontrol-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
@@ -58,7 +58,7 @@ jobs:
         working-directory: desktop
       - run: npm run tauri -- build
         working-directory: desktop
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-windows
           path: |
@@ -83,7 +83,7 @@ jobs:
         working-directory: desktop
       - run: npm run tauri -- build --bundles deb,appimage
         working-directory: desktop
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-linux
           path: |
@@ -107,7 +107,7 @@ jobs:
         working-directory: desktop
       - run: npm run tauri -- build --bundles dmg
         working-directory: desktop
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-macos
           path: desktop/src-tauri/target/release/bundle/dmg/*.dmg
@@ -127,7 +127,7 @@ jobs:
       - run: VERSION="${GITHUB_REF_NAME#v}" python scripts/build_pypi.py
       - run: python -m build --wheel
       - run: python -m twine check dist/*.whl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pypi-wheel
           path: dist/*.whl
