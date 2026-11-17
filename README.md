@@ -35,6 +35,11 @@ $ gitcontrol --json status
 {"ok":true,"data":{"branch":"main","head_oid":"2b1a0ce...","files":[]}}
 ```
 
+## Vídeos
+
+- [Demo em 48s](https://youtu.be/BicotUEnj6E) — TUI, desktop e CLI em menos de um minuto.
+- [Tour completo](https://www.youtube.com/watch?v=Rahg2J7Mos8) — 2 minutos, com capítulos.
+
 ## O que funciona
 
 - Branches: listar, criar, deletar, renomear, checkout (local e remota com
